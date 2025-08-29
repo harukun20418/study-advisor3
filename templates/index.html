@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>勉強アドバイザーAI</title>
+
+  <!-- PWA 用設定 -->
+  <link rel="manifest" href="/static/manifest.json">
+  <meta name="theme-color" content="#4CAF50">
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/static/service-worker.js')
+        .then(() => console.log('Service Worker Registered'));
+    }
+  </script>
+
+  <style>
+    body { font-family: sans-serif; max-width: 600px; margin: auto; }
+    #chatbox { border: 1px solid #ccc; padding: 10px; height: 400px; overflow-y: scroll; margin-bottom: 10px; }
+    .message { margin-bottom: 10px; }
+    .user { text-align: right; color: blue; }
+    .ai { text-align: left; color: green; }
+    .controls { display: flex; gap: 5px; }
+    input[type="text"] { flex: 1; }
+  </style>
+</head>
+<body>
+  <h2>勉強アドバイザーAI</h2>
+  <div id="chatbox"></div>
+
+  <div class="controls">
+    <input type="text" id="userInput" placeholder="メッセージを入力...">
+    <button onclick="sendMessage()">送信</button>
+  </div>
+
+  <a href="/sessions">過去のセッション一覧を見る</a>
+
+  <script>
+    const chatbox = document.getElementById("chatbox");
+
+    // ユーザーごとのセッションIDを生成
+    const sessionId = crypto.randomUUID();
+
+    async function sendMessage() {
+      const input = document.getElementById("userInput");
+      const userMessage = input.value;
+      if (!userMessage.trim()) return;
+
+      // ユーザーの発言を表示
+      chatbox.innerHTML += `<div class="message user">あなた: ${userMessage}</div>`;
+      chatbox.scrollTop = chatbox.scrollHeight;
+
+      // サーバーに送信
+      const res = await fetch("/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: userMessage,
+          session_id: sessionId
+        })
+      });
+
+      const data = await res.json();
+      const aiMessage = data.response;
+
+      // AIの返答を表示
+      chatbox.innerHTML += `<div class="message ai">AI: ${aiMessage}</div>`;
+      chatbox.scrollTop = chatbox.scrollHeight;
+
+      input.value = "";
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+<!-- templates/sessions.html -->
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>セッション一覧</title>
+  <style>
+    body { font-family: sans-serif; max-width: 600px; margin: auto; }
+    ul { padding-left: 20px; }
+    li { margin-bottom: 8px; }
+    a { text-decoration: none; color: #0066cc; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <h2>セッション一覧</h2>
+  <ul>
+    {% for session_id in session_ids %}
+      <li><a href="/chat/{{ session_id }}">{{ session_id }}</a></li>
+    {% endfor %}
+  </ul>
+</body>
+</html>
