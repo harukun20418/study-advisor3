@@ -23,7 +23,6 @@
             flex: 1;
             padding: 10px;
             overflow-y: auto;
-            position: relative;
         }
 
         .messages {
@@ -32,7 +31,6 @@
             gap: 10px;
             flex: 1;
             overflow-y: auto;
-            padding-bottom: 10px;
         }
 
         .message {
@@ -41,6 +39,7 @@
             border-radius: 20px;
             word-wrap: break-word;
             position: relative;
+            padding-bottom: 30px; /* 取り消しボタン用スペース確保 */
         }
 
         .user {
@@ -55,6 +54,19 @@
             color: black;
             align-self: flex-start;
             border-bottom-left-radius: 0;
+        }
+
+        .undo-btn {
+            position: absolute;
+            bottom: 5px;
+            left: 5px;
+            font-size: 12px;
+            padding: 2px 6px;
+            border: none;
+            border-radius: 5px;
+            background-color: #ff6666;
+            color: white;
+            cursor: pointer;
         }
 
         .chat-form {
@@ -86,21 +98,6 @@
             background-color: #aaa;
             cursor: not-allowed;
         }
-
-        /* 取り消しボタン */
-        .undo-btn {
-            position: absolute;
-            bottom: 5px;
-            left: 5px; /* 左下 */
-            background: #ff4d4d;
-            border: none;
-            border-radius: 5px;
-            color: white;
-            padding: 3px 6px;
-            cursor: pointer;
-            font-size: 12px;
-            z-index: 10;
-        }
     </style>
 </head>
 <body>
@@ -120,45 +117,31 @@
         const messages = document.getElementById("messages");
         const sendButton = document.getElementById("send-button");
         const sessionId = "default-session"; // 必要に応じて動的生成
+
         let isWaitingForReply = false;
+        let lastUserMessageElement = null;
+        let lastAiMessageElement = null;
 
-        // 直前のユーザーとAIのペア
-        let lastPair = null;
-
-        // 履歴を localStorage から読み込む
-        let chatHistory = JSON.parse(localStorage.getItem(sessionId)) || [];
-
-        function renderHistory() {
-            messages.innerHTML = "";
-            chatHistory.forEach(msg => {
-                appendMessage(msg.content, msg.sender, false);
-            });
-        }
-
-        function saveHistory() {
-            localStorage.setItem(sessionId, JSON.stringify(chatHistory));
-        }
-
-        function appendMessage(content, sender, allowUndo=false) {
+        function appendMessage(content, sender, addUndo = false) {
             const div = document.createElement("div");
             div.classList.add("message", sender);
             div.textContent = content;
 
-            if (allowUndo && sender === "user") {
-                const btn = document.createElement("button");
-                btn.textContent = "取り消し";
-                btn.classList.add("undo-btn");
-                btn.onclick = () => {
-                    if (lastPair) {
-                        lastPair.user.remove();
-                        if (lastPair.ai) lastPair.ai.remove();
-                        // localStorage からも削除
-                        chatHistory = chatHistory.slice(0, -2);
-                        saveHistory();
-                        lastPair = null;
-                    }
-                };
-                div.appendChild(btn);
+            if (addUndo && sender === "user") {
+                const undoBtn = document.createElement("button");
+                undoBtn.textContent = "取り消し";
+                undoBtn.classList.add("undo-btn");
+                undoBtn.addEventListener("click", async () => {
+                    // 取り消し時、ユーザーとAI両方の最後のメッセージを削除
+                    if (lastUserMessageElement) lastUserMessageElement.remove();
+                    if (lastAiMessageElement) lastAiMessageElement.remove();
+
+                    // サーバー側のDBに反映させる場合はここでAPI呼び出し可能
+                    lastUserMessageElement = null;
+                    lastAiMessageElement = null;
+                });
+                div.appendChild(undoBtn);
+                lastUserMessageElement = div;
             }
 
             messages.appendChild(div);
@@ -166,21 +149,8 @@
             return div;
         }
 
-        renderHistory(); // 読み込んだ履歴を表示
-
-        // ペアを localStorage に保存する関数
-        function addToHistory(userText, aiText) {
-            chatHistory.push({ sender: "user", content: userText });
-            chatHistory.push({ sender: "ai", content: aiText });
-            saveHistory();
-        }
-
-        form.addEventListener("submit", async (e) => {
-            e.preventDefault();
-            if (isWaitingForReply || !input.value.trim()) return;
-
-            const userMessage = input.value.trim();
-            const userDiv = appendMessage(userMessage, "user", true);
+        async function sendMessage(userMessage) {
+            appendMessage(userMessage, "user", true);
             input.value = "";
             isWaitingForReply = true;
             sendButton.disabled = true;
@@ -189,23 +159,45 @@
                 const response = await fetch("/chat", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        message: userMessage,
-                        session_id: sessionId
-                    })
+                    body: JSON.stringify({ message: userMessage, session_id: sessionId })
                 });
                 const data = await response.json();
                 const aiDiv = appendMessage(data.response, "ai");
-                lastPair = { user: userDiv, ai: aiDiv };
-                addToHistory(userMessage, data.response); // localStorage に追加
+                lastAiMessageElement = aiDiv;
             } catch (err) {
                 const aiDiv = appendMessage("通信エラーが発生しました。", "ai");
-                lastPair = { user: userDiv, ai: aiDiv };
+                lastAiMessageElement = aiDiv;
             } finally {
                 isWaitingForReply = false;
                 sendButton.disabled = false;
             }
+        }
+
+        form.addEventListener("submit", (e) => {
+            e.preventDefault();
+            if (isWaitingForReply || !input.value.trim()) return;
+            sendMessage(input.value.trim());
         });
+
+        // ページロード時にローカルストレージから復元
+        window.addEventListener("load", () => {
+            const savedMessages = JSON.parse(localStorage.getItem(sessionId) || "[]");
+            savedMessages.forEach(msg => {
+                const div = appendMessage(msg.content, msg.sender, msg.sender === "user");
+                if (msg.sender === "user") lastUserMessageElement = div;
+                if (msg.sender === "ai") lastAiMessageElement = div;
+            });
+        });
+
+        // メッセージ送信後にローカルストレージに保存
+        const observer = new MutationObserver(() => {
+            const allMessages = Array.from(messages.children).map(m => {
+                const sender = m.classList.contains("user") ? "user" : "ai";
+                return { content: m.childNodes[0].nodeValue, sender };
+            });
+            localStorage.setItem(sessionId, JSON.stringify(allMessages));
+        });
+        observer.observe(messages, { childList: true });
     </script>
 </body>
 </html>
