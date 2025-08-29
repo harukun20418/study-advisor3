@@ -87,11 +87,13 @@ def chat(request: ChatRequest):
     db.commit()
 
     # AIにリクエスト
+    import os
+
     headers = {
-        "Authorization":
-        "Bearer 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",
+        "Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}",
         "Content-Type": "application/json"
     }
+
     data = {
         "model":
         "openai/gpt-3.5-turbo",
