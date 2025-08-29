@@ -23,6 +23,7 @@
             flex: 1;
             padding: 10px;
             overflow-y: auto;
+            position: relative;
         }
 
         .messages {
@@ -31,6 +32,7 @@
             gap: 10px;
             flex: 1;
             overflow-y: auto;
+            padding-bottom: 10px;
         }
 
         .message {
@@ -53,19 +55,6 @@
             color: black;
             align-self: flex-start;
             border-bottom-left-radius: 0;
-        }
-
-        .undo-btn {
-            position: absolute;
-            top: -5px;
-            right: -50px;
-            background: #ff4d4d;
-            border: none;
-            border-radius: 5px;
-            color: white;
-            padding: 3px 6px;
-            cursor: pointer;
-            font-size: 12px;
         }
 
         .chat-form {
@@ -97,11 +86,28 @@
             background-color: #aaa;
             cursor: not-allowed;
         }
+
+        /* 取り消しボタン */
+        .undo-btn {
+            position: absolute;
+            bottom: 5px;
+            left: 5px; /* 左下 */
+            background: #ff4d4d;
+            border: none;
+            border-radius: 5px;
+            color: white;
+            padding: 3px 6px;
+            cursor: pointer;
+            font-size: 12px;
+            z-index: 10;
+        }
     </style>
 </head>
 <body>
     <div id="chat-container" class="chat-container">
-        <div id="messages" class="messages"></div>
+        <div id="messages" class="messages">
+            <!-- メッセージがここに追加されます -->
+        </div>
         <form id="chat-form" class="chat-form">
             <input type="text" id="chat-input" placeholder="メッセージを入力..." />
             <button type="submit" id="send-button">送信</button>
@@ -115,14 +121,30 @@
         const sendButton = document.getElementById("send-button");
         const sessionId = "default-session"; // 必要に応じて動的生成
         let isWaitingForReply = false;
-        let lastPair = null; // 直前送信+AI返答のペア
 
-        function appendMessage(content, sender, undo=false) {
+        // 直前のユーザーとAIのペア
+        let lastPair = null;
+
+        // 履歴を localStorage から読み込む
+        let chatHistory = JSON.parse(localStorage.getItem(sessionId)) || [];
+
+        function renderHistory() {
+            messages.innerHTML = "";
+            chatHistory.forEach(msg => {
+                appendMessage(msg.content, msg.sender, false);
+            });
+        }
+
+        function saveHistory() {
+            localStorage.setItem(sessionId, JSON.stringify(chatHistory));
+        }
+
+        function appendMessage(content, sender, allowUndo=false) {
             const div = document.createElement("div");
             div.classList.add("message", sender);
             div.textContent = content;
 
-            if (undo) {
+            if (allowUndo && sender === "user") {
                 const btn = document.createElement("button");
                 btn.textContent = "取り消し";
                 btn.classList.add("undo-btn");
@@ -130,9 +152,10 @@
                     if (lastPair) {
                         lastPair.user.remove();
                         if (lastPair.ai) lastPair.ai.remove();
+                        // localStorage からも削除
+                        chatHistory = chatHistory.slice(0, -2);
+                        saveHistory();
                         lastPair = null;
-                        isWaitingForReply = false;
-                        sendButton.disabled = false;
                     }
                 };
                 div.appendChild(btn);
@@ -143,46 +166,44 @@
             return div;
         }
 
+        renderHistory(); // 読み込んだ履歴を表示
+
+        // ペアを localStorage に保存する関数
+        function addToHistory(userText, aiText) {
+            chatHistory.push({ sender: "user", content: userText });
+            chatHistory.push({ sender: "ai", content: aiText });
+            saveHistory();
+        }
+
         form.addEventListener("submit", async (e) => {
             e.preventDefault();
             if (isWaitingForReply || !input.value.trim()) return;
 
             const userMessage = input.value.trim();
+            const userDiv = appendMessage(userMessage, "user", true);
             input.value = "";
             isWaitingForReply = true;
             sendButton.disabled = true;
-
-            // ユーザーメッセージ追加 + 取り消しボタン
-            const userDiv = appendMessage(userMessage, "user", true);
-
-            // AI返答用のdivを作っておく
-            const aiDiv = document.createElement("div");
-            aiDiv.classList.add("message", "ai");
-            messages.appendChild(aiDiv);
-            messages.scrollTop = messages.scrollHeight;
-
-            lastPair = { user: userDiv, ai: aiDiv };
 
             try {
                 const response = await fetch("/chat", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ message: userMessage, session_id: sessionId })
+                    body: JSON.stringify({
+                        message: userMessage,
+                        session_id: sessionId
+                    })
                 });
                 const data = await response.json();
-                aiDiv.textContent = data.response;
-
-                // AI返答が来たら取り消し不可
-                const btn = userDiv.querySelector(".undo-btn");
-                if (btn) btn.remove();
-                lastPair = null;
+                const aiDiv = appendMessage(data.response, "ai");
+                lastPair = { user: userDiv, ai: aiDiv };
+                addToHistory(userMessage, data.response); // localStorage に追加
             } catch (err) {
-                aiDiv.textContent = "通信エラーが発生しました。";
-                lastPair = null;
+                const aiDiv = appendMessage("通信エラーが発生しました。", "ai");
+                lastPair = { user: userDiv, ai: aiDiv };
             } finally {
                 isWaitingForReply = false;
                 sendButton.disabled = false;
-                messages.scrollTop = messages.scrollHeight;
             }
         });
     </script>
