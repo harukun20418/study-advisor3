@@ -97,50 +97,75 @@
     </div>
 
     <script>
-        const form = document.getElementById("chat-form");
-        const input = document.getElementById("chat-input");
-        const messages = document.getElementById("messages");
-        const sendButton = document.getElementById("send-button");
-        let isWaitingForReply = false;
-        const sessionId = "default-session"; // 必要に応じて動的生成
-
-        function appendMessage(content, sender) {
-            const div = document.createElement("div");
-            div.classList.add("message", sender);
-            div.textContent = content;
-            messages.appendChild(div);
-            messages.scrollTop = messages.scrollHeight;
-        }
-
-        form.addEventListener("submit", async (e) => {
-            e.preventDefault();
-            if (isWaitingForReply || !input.value.trim()) return;
-
-            const userMessage = input.value.trim();
-            appendMessage(userMessage, "user");
-            input.value = "";
-            isWaitingForReply = true;
-            sendButton.disabled = true;
-
-            try {
-                const response = await fetch("/chat", {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify({
-                        message: userMessage,
-                        session_id: sessionId
-                    })
-                });
-                const data = await response.json();
-                appendMessage(data.response, "ai");
-            } catch (err) {
-                appendMessage("通信エラーが発生しました。", "ai");
-            } finally {
-                isWaitingForReply = false;
-                sendButton.disabled = false;
+        document.addEventListener("DOMContentLoaded", () => {
+            // --- 端末ごとに固定の session_id を作成 ---
+            let sessionId = localStorage.getItem("sessionId");
+            if (!sessionId) {
+                sessionId = "sess_" + Math.random().toString(36).substring(2);
+                localStorage.setItem("sessionId", sessionId);
             }
+
+            const chatForm = document.getElementById("chat-form");
+            const chatInput = document.getElementById("chat-input");
+            const messagesContainer = document.getElementById("messages");
+            const sendButton = document.getElementById("send-button");
+            let isWaitingForReply = false;
+
+            // --- メッセージを画面に追加 ---
+            function addMessage(content, role) {
+                const messageEl = document.createElement("div");
+                messageEl.classList.add("message", role === "assistant" ? "ai" : "user");
+                messageEl.textContent = content;
+                messagesContainer.appendChild(messageEl);
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+
+            // --- ページ読み込み時に履歴を取得 ---
+            async function loadHistory() {
+                try {
+                    const res = await fetch(`/history/${sessionId}`);
+                    const data = await res.json();
+                    if (data.history) {
+                        data.history.forEach(msg => addMessage(msg.content, msg.role));
+                    }
+                } catch (err) {
+                    console.error(err);
+                }
+            }
+
+            loadHistory();
+
+            // --- フォーム送信 ---
+            chatForm.addEventListener("submit", async (e) => {
+                e.preventDefault();
+                const message = chatInput.value.trim();
+                if (!message || isWaitingForReply) return;
+
+                addMessage(message, "user");
+                chatInput.value = "";
+                isWaitingForReply = true;
+                sendButton.disabled = true;
+
+                try {
+                    const res = await fetch("/chat", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ message: message, session_id: sessionId })
+                    });
+                    const data = await res.json();
+                    if (data.response) {
+                        addMessage(data.response, "assistant");
+                    } else {
+                        addMessage("AIからの応答がありません", "assistant");
+                    }
+                } catch (err) {
+                    console.error(err);
+                    addMessage("通信エラーが発生しました", "assistant");
+                } finally {
+                    isWaitingForReply = false;
+                    sendButton.disabled = false;
+                }
+            });
         });
     </script>
 </body>
