@@ -38,6 +38,7 @@
             padding: 10px 15px;
             border-radius: 20px;
             word-wrap: break-word;
+            position: relative;
         }
 
         .user {
@@ -52,6 +53,19 @@
             color: black;
             align-self: flex-start;
             border-bottom-left-radius: 0;
+        }
+
+        .undo-btn {
+            position: absolute;
+            top: -5px;
+            right: -50px;
+            background: #ff4d4d;
+            border: none;
+            border-radius: 5px;
+            color: white;
+            padding: 3px 6px;
+            cursor: pointer;
+            font-size: 12px;
         }
 
         .chat-form {
@@ -87,9 +101,7 @@
 </head>
 <body>
     <div id="chat-container" class="chat-container">
-        <div id="messages" class="messages">
-            <!-- メッセージがここに追加されます -->
-        </div>
+        <div id="messages" class="messages"></div>
         <form id="chat-form" class="chat-form">
             <input type="text" id="chat-input" placeholder="メッセージを入力..." />
             <button type="submit" id="send-button">送信</button>
@@ -97,75 +109,81 @@
     </div>
 
     <script>
-        document.addEventListener("DOMContentLoaded", () => {
-            // --- 端末ごとに固定の session_id を作成 ---
-            let sessionId = localStorage.getItem("sessionId");
-            if (!sessionId) {
-                sessionId = "sess_" + Math.random().toString(36).substring(2);
-                localStorage.setItem("sessionId", sessionId);
-            }
+        const form = document.getElementById("chat-form");
+        const input = document.getElementById("chat-input");
+        const messages = document.getElementById("messages");
+        const sendButton = document.getElementById("send-button");
+        const sessionId = "default-session"; // 必要に応じて動的生成
+        let isWaitingForReply = false;
+        let lastPair = null; // 直前送信+AI返答のペア
 
-            const chatForm = document.getElementById("chat-form");
-            const chatInput = document.getElementById("chat-input");
-            const messagesContainer = document.getElementById("messages");
-            const sendButton = document.getElementById("send-button");
-            let isWaitingForReply = false;
+        function appendMessage(content, sender, undo=false) {
+            const div = document.createElement("div");
+            div.classList.add("message", sender);
+            div.textContent = content;
 
-            // --- メッセージを画面に追加 ---
-            function addMessage(content, role) {
-                const messageEl = document.createElement("div");
-                messageEl.classList.add("message", role === "assistant" ? "ai" : "user");
-                messageEl.textContent = content;
-                messagesContainer.appendChild(messageEl);
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            }
-
-            // --- ページ読み込み時に履歴を取得 ---
-            async function loadHistory() {
-                try {
-                    const res = await fetch(`/history/${sessionId}`);
-                    const data = await res.json();
-                    if (data.history) {
-                        data.history.forEach(msg => addMessage(msg.content, msg.role));
+            if (undo) {
+                const btn = document.createElement("button");
+                btn.textContent = "取り消し";
+                btn.classList.add("undo-btn");
+                btn.onclick = () => {
+                    if (lastPair) {
+                        lastPair.user.remove();
+                        if (lastPair.ai) lastPair.ai.remove();
+                        lastPair = null;
+                        isWaitingForReply = false;
+                        sendButton.disabled = false;
                     }
-                } catch (err) {
-                    console.error(err);
-                }
+                };
+                div.appendChild(btn);
             }
 
-            loadHistory();
+            messages.appendChild(div);
+            messages.scrollTop = messages.scrollHeight;
+            return div;
+        }
 
-            // --- フォーム送信 ---
-            chatForm.addEventListener("submit", async (e) => {
-                e.preventDefault();
-                const message = chatInput.value.trim();
-                if (!message || isWaitingForReply) return;
+        form.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            if (isWaitingForReply || !input.value.trim()) return;
 
-                addMessage(message, "user");
-                chatInput.value = "";
-                isWaitingForReply = true;
-                sendButton.disabled = true;
+            const userMessage = input.value.trim();
+            input.value = "";
+            isWaitingForReply = true;
+            sendButton.disabled = true;
 
-                try {
-                    const res = await fetch("/chat", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ message: message, session_id: sessionId })
-                    });
-                    const data = await res.json();
-                    if (data.response) {
-                        addMessage(data.response, "assistant");
-                    } else {
-                        addMessage("AIからの応答がありません", "assistant");
-                    }
-                } catch (err) {
-                    console.error(err);
-                    addMessage("通信エラーが発生しました", "assistant");
-                } finally {
-                    isWaitingForReply = false;
-                    sendButton.disabled = false;
-                }
-            });
+            // ユーザーメッセージ追加 + 取り消しボタン
+            const userDiv = appendMessage(userMessage, "user", true);
+
+            // AI返答用のdivを作っておく
+            const aiDiv = document.createElement("div");
+            aiDiv.classList.add("message", "ai");
+            messages.appendChild(aiDiv);
+            messages.scrollTop = messages.scrollHeight;
+
+            lastPair = { user: userDiv, ai: aiDiv };
+
+            try {
+                const response = await fetch("/chat", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ message: userMessage, session_id: sessionId })
+                });
+                const data = await response.json();
+                aiDiv.textContent = data.response;
+
+                // AI返答が来たら取り消し不可
+                const btn = userDiv.querySelector(".undo-btn");
+                if (btn) btn.remove();
+                lastPair = null;
+            } catch (err) {
+                aiDiv.textContent = "通信エラーが発生しました。";
+                lastPair = null;
+            } finally {
+                isWaitingForReply = false;
+                sendButton.disabled = false;
+                messages.scrollTop = messages.scrollHeight;
+            }
         });
     </script>
 </body>
