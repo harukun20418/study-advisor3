@@ -1,203 +1,134 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="manifest" href="/static/manifest.json">
-    <title>勉強アドバイザーAI</title>
-    <link rel="stylesheet" href="/static/style.css">
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background: #f5f5f5;
-            margin: 0;
-            padding: 0;
-            display: flex;
-            flex-direction: column;
-            height: 100vh;
-        }
-
-        .chat-container {
-            display: flex;
-            flex-direction: column;
-            flex: 1;
-            padding: 10px;
-            overflow-y: auto;
-        }
-
-        .messages {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            flex: 1;
-            overflow-y: auto;
-        }
-
-        .message {
-            max-width: 70%;
-            padding: 10px 15px;
-            border-radius: 20px;
-            word-wrap: break-word;
-            position: relative;
-            padding-bottom: 30px; /* 取り消しボタン用スペース確保 */
-        }
-
-        .user {
-            background-color: #4a90e2;
-            color: white;
-            align-self: flex-end;
-            border-bottom-right-radius: 0;
-        }
-
-        .ai {
-            background-color: #e0e0e0;
-            color: black;
-            align-self: flex-start;
-            border-bottom-left-radius: 0;
-        }
-
-        .undo-btn {
-            position: absolute;
-            bottom: 5px;
-            left: 5px;
-            font-size: 12px;
-            padding: 2px 6px;
-            border: none;
-            border-radius: 5px;
-            background-color: #ff6666;
-            color: white;
-            cursor: pointer;
-        }
-
-        .chat-form {
-            display: flex;
-            padding: 10px;
-            gap: 10px;
-            border-top: 1px solid #ccc;
-            background: white;
-        }
-
-        .chat-form input {
-            flex: 1;
-            padding: 10px;
-            border-radius: 20px;
-            border: 1px solid #ccc;
-        }
-
-        .chat-form button {
-            padding: 10px 20px;
-            border-radius: 20px;
-            border: none;
-            background-color: #4a90e2;
-            color: white;
-            font-weight: bold;
-            cursor: pointer;
-        }
-
-        .chat-form button:disabled {
-            background-color: #aaa;
-            cursor: not-allowed;
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="/static/manifest.json">
+<title>勉強アドバイザーAI</title>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+body { font-family: Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; }
+.chat-container { display: flex; flex-direction: column; flex: 1; padding: 10px; overflow-y: auto; }
+.messages { display: flex; flex-direction: column; gap: 10px; flex: 1; overflow-y: auto; }
+.message { max-width: 70%; padding: 10px 15px; border-radius: 20px; word-wrap: break-word; position: relative; }
+.user { background-color: #4a90e2; color: white; align-self: flex-end; border-bottom-right-radius: 0; }
+.ai { background-color: #e0e0e0; color: black; align-self: flex-start; border-bottom-left-radius: 0; }
+.delete-btn { position: absolute; bottom: 2px; left: 2px; background: red; color: white; border: none; border-radius: 50%; width: 20px; height: 20px; display: none; cursor: pointer; font-size: 12px; }
+.message.user:hover .delete-btn { display: block; }
+.chat-form { display: flex; padding: 10px; gap: 10px; border-top: 1px solid #ccc; background: white; }
+.chat-form input { flex: 1; padding: 10px; border-radius: 20px; border: 1px solid #ccc; }
+.chat-form button { padding: 10px 20px; border-radius: 20px; border: none; background-color: #4a90e2; color: white; font-weight: bold; cursor: pointer; }
+.chat-form button:disabled { background-color: #aaa; cursor: not-allowed; }
+.status { text-align: center; font-size: 14px; color: #666; margin-bottom: 5px; display: none; }
+</style>
 </head>
 <body>
-    <div id="chat-container" class="chat-container">
-        <div id="messages" class="messages">
-            <!-- メッセージがここに追加されます -->
-        </div>
-        <form id="chat-form" class="chat-form">
-            <input type="text" id="chat-input" placeholder="メッセージを入力..." />
-            <button type="submit" id="send-button">送信</button>
-        </form>
-    </div>
+<div id="chat-container" class="chat-container">
+    <div id="status" class="status">AIが返信中です...</div>
+    <div id="messages" class="messages"></div>
+    <form id="chat-form" class="chat-form">
+        <input type="text" id="chat-input" placeholder="メッセージを入力..." />
+        <button type="submit" id="send-button">送信</button>
+    </form>
+</div>
 
-    <script>
-        const form = document.getElementById("chat-form");
-        const input = document.getElementById("chat-input");
-        const messages = document.getElementById("messages");
-        const sendButton = document.getElementById("send-button");
-        const sessionId = "default-session"; // 必要に応じて動的生成
+<script>
+const form = document.getElementById("chat-form");
+const input = document.getElementById("chat-input");
+const messages = document.getElementById("messages");
+const sendButton = document.getElementById("send-button");
+const status = document.getElementById("status");
+let isWaitingForReply = false;
+let sessionId = "default-session";
 
-        let isWaitingForReply = false;
-        let lastUserMessageElement = null;
-        let lastAiMessageElement = null;
+let questionIndex = 0;
+const questions = [
+    "こんにちは！私はあなたの勉強をサポートします！まずは5つの質問であなたのことを教えてください",
+    "あなたのことは何と呼べばいいですか？",
+    "了解です！何のための勉強をサポートしてほしいですか？(例: 試験対策、受験勉強など)",
+    "なるほど、普段の1日の勉強時間はどのくらいですか？",
+    "スマホは１日どれくらい使いますか？",
+    "勉強はコツコツやる派ですかそれとも一夜漬けタイプ？"
+];
 
-        function appendMessage(content, sender, addUndo = false) {
-            const div = document.createElement("div");
-            div.classList.add("message", sender);
-            div.textContent = content;
-
-            if (addUndo && sender === "user") {
-                const undoBtn = document.createElement("button");
-                undoBtn.textContent = "取り消し";
-                undoBtn.classList.add("undo-btn");
-                undoBtn.addEventListener("click", async () => {
-                    // 取り消し時、ユーザーとAI両方の最後のメッセージを削除
-                    if (lastUserMessageElement) lastUserMessageElement.remove();
-                    if (lastAiMessageElement) lastAiMessageElement.remove();
-
-                    // サーバー側のDBに反映させる場合はここでAPI呼び出し可能
-                    lastUserMessageElement = null;
-                    lastAiMessageElement = null;
-                });
-                div.appendChild(undoBtn);
-                lastUserMessageElement = div;
+function appendMessage(content, sender, msgId=null) {
+    const div = document.createElement("div");
+    div.classList.add("message", sender);
+    div.textContent = content;
+    if(sender === "user") {
+        const delBtn = document.createElement("button");
+        delBtn.textContent = "×";
+        delBtn.className = "delete-btn";
+        delBtn.onclick = async () => {
+            // 直前メッセージとAI返信削除
+            if(messages.lastChild.previousSibling){
+                messages.removeChild(messages.lastChild.previousSibling); 
             }
+            messages.removeChild(div);
+            await fetch(`/delete_last/${sessionId}`, { method: "DELETE" });
+        };
+        div.appendChild(delBtn);
+    }
+    messages.appendChild(div);
+    messages.scrollTop = messages.scrollHeight;
+}
 
-            messages.appendChild(div);
-            messages.scrollTop = messages.scrollHeight;
-            return div;
-        }
+async function askNextQuestion() {
+    if(questionIndex < questions.length){
+        appendMessage(questions[questionIndex], "ai");
+        questionIndex++;
+        isWaitingForReply = false;
+        sendButton.disabled = false;
+    }
+}
 
-        async function sendMessage(userMessage) {
-            appendMessage(userMessage, "user", true);
-            input.value = "";
-            isWaitingForReply = true;
-            sendButton.disabled = true;
-
-            try {
-                const response = await fetch("/chat", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ message: userMessage, session_id: sessionId })
-                });
-                const data = await response.json();
-                const aiDiv = appendMessage(data.response, "ai");
-                lastAiMessageElement = aiDiv;
-            } catch (err) {
-                const aiDiv = appendMessage("通信エラーが発生しました。", "ai");
-                lastAiMessageElement = aiDiv;
-            } finally {
-                isWaitingForReply = false;
-                sendButton.disabled = false;
-            }
-        }
-
-        form.addEventListener("submit", (e) => {
-            e.preventDefault();
-            if (isWaitingForReply || !input.value.trim()) return;
-            sendMessage(input.value.trim());
+async function sendMessage(userMessage){
+    status.style.display = "block";
+    try{
+        const response = await fetch("/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: userMessage, session_id: sessionId })
         });
+        const data = await response.json();
+        appendMessage(data.response, "ai");
+    } catch(err){
+        appendMessage("通信エラーが発生しました。", "ai");
+    } finally {
+        status.style.display = "none";
+        isWaitingForReply = false;
+        sendButton.disabled = false;
+    }
+}
 
-        // ページロード時にローカルストレージから復元
-        window.addEventListener("load", () => {
-            const savedMessages = JSON.parse(localStorage.getItem(sessionId) || "[]");
-            savedMessages.forEach(msg => {
-                const div = appendMessage(msg.content, msg.sender, msg.sender === "user");
-                if (msg.sender === "user") lastUserMessageElement = div;
-                if (msg.sender === "ai") lastAiMessageElement = div;
-            });
-        });
+// 初回起動時にAIから話しかける
+window.onload = () => {
+    askNextQuestion();
+};
 
-        // メッセージ送信後にローカルストレージに保存
-        const observer = new MutationObserver(() => {
-            const allMessages = Array.from(messages.children).map(m => {
-                const sender = m.classList.contains("user") ? "user" : "ai";
-                return { content: m.childNodes[0].nodeValue, sender };
-            });
-            localStorage.setItem(sessionId, JSON.stringify(allMessages));
+form.addEventListener("submit", async (e)=>{
+    e.preventDefault();
+    if(isWaitingForReply || !input.value.trim()) return;
+
+    const userMessage = input.value.trim();
+    appendMessage(userMessage, "user");
+    input.value = "";
+    isWaitingForReply = true;
+    sendButton.disabled = true;
+
+    if(questionIndex < questions.length){
+        // 質問モード
+        await fetch("/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: userMessage, session_id: sessionId })
         });
-        observer.observe(messages, { childList: true });
-    </script>
+        askNextQuestion();
+    } else {
+        // 通常会話モード
+        sendMessage(userMessage);
+    }
+});
+</script>
 </body>
 </html>
