@@ -7,19 +7,18 @@
 <title>勉強アドバイザーAI</title>
 <link rel="stylesheet" href="/static/style.css">
 <style>
-body { font-family: Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; }
-.chat-container { display: flex; flex-direction: column; flex: 1; padding: 10px; overflow-y: auto; }
-.messages { display: flex; flex-direction: column; gap: 10px; flex: 1; overflow-y: auto; }
-.message { max-width: 70%; padding: 10px 15px; border-radius: 20px; word-wrap: break-word; position: relative; }
-.user { background-color: #4a90e2; color: white; align-self: flex-end; border-bottom-right-radius: 0; }
-.ai { background-color: #e0e0e0; color: black; align-self: flex-start; border-bottom-left-radius: 0; }
-.delete-btn { position: absolute; bottom: 2px; left: 2px; background: red; color: white; border: none; border-radius: 50%; width: 20px; height: 20px; display: none; cursor: pointer; font-size: 12px; }
-.message.user:hover .delete-btn { display: block; }
-.chat-form { display: flex; padding: 10px; gap: 10px; border-top: 1px solid #ccc; background: white; }
-.chat-form input { flex: 1; padding: 10px; border-radius: 20px; border: 1px solid #ccc; }
-.chat-form button { padding: 10px 20px; border-radius: 20px; border: none; background-color: #4a90e2; color: white; font-weight: bold; cursor: pointer; }
-.chat-form button:disabled { background-color: #aaa; cursor: not-allowed; }
-.status { text-align: center; font-size: 14px; color: #666; margin-bottom: 5px; display: none; }
+body { font-family: Arial, sans-serif; background: #f5f5f5; margin:0; padding:0; display:flex; flex-direction:column; height:100vh;}
+.chat-container { flex:1; display:flex; flex-direction:column; padding:10px; overflow-y:auto;}
+.messages { flex:1; display:flex; flex-direction:column; gap:10px; overflow-y:auto;}
+.message { max-width:70%; padding:10px 15px; border-radius:20px; word-wrap:break-word; position:relative;}
+.user { background-color:#4a90e2; color:white; align-self:flex-end; border-bottom-right-radius:0;}
+.ai { background-color:#e0e0e0; color:black; align-self:flex-start; border-bottom-left-radius:0;}
+.delete-btn { position:absolute; bottom:2px; left:2px; background:red; color:white; border:none; border-radius:50%; width:20px; height:20px; display:none; cursor:pointer; font-size:12px;}
+.chat-form { display:flex; padding:10px; gap:10px; border-top:1px solid #ccc; background:white;}
+.chat-form input { flex:1; padding:10px; border-radius:20px; border:1px solid #ccc;}
+.chat-form button { padding:10px 20px; border-radius:20px; border:none; background-color:#4a90e2; color:white; font-weight:bold; cursor:pointer;}
+.chat-form button:disabled { background-color:#aaa; cursor:not-allowed;}
+.status { text-align:center; font-size:14px; color:#666; margin-bottom:5px; display:none;}
 </style>
 </head>
 <body>
@@ -41,91 +40,81 @@ const status = document.getElementById("status");
 let isWaitingForReply = false;
 let sessionId = "default-session";
 
-let questionIndex = 0;
 const questions = [
-    "こんにちは！私はあなたの勉強をサポートします！まずは5つの質問であなたのことを教えてください",
+    "こんにちは！私はあなたの勉強をサポートします！まずは質問であなたのことを教えてください",
     "あなたのことは何と呼べばいいですか？",
-    "了解です！何のための勉強をサポートしてほしいですか？(例: 試験対策、受験勉強など)",
-    "なるほど、普段の1日の勉強時間はどのくらいですか？",
-    "スマホは１日どれくらい使いますか？",
-    "勉強はコツコツやる派ですかそれとも一夜漬けタイプ？"
+    "何のための勉強をサポートしてほしいですか？",
+    "普段の1日の勉強時間はどのくらいですか？",
+    "スマホは1日どれくらい使いますか？",
+    "勉強はコツコツ派ですか一夜漬けタイプですか？"
 ];
 
-function appendMessage(content, sender, msgId=null) {
+let questionIndex = 0;
+
+function appendMessage(content, sender){
     const div = document.createElement("div");
     div.classList.add("message", sender);
     div.textContent = content;
-    if(sender === "user") {
-        const delBtn = document.createElement("button");
-        delBtn.textContent = "×";
-        delBtn.className = "delete-btn";
-        delBtn.onclick = async () => {
-            // 直前メッセージとAI返信削除
-            if(messages.lastChild.previousSibling){
-                messages.removeChild(messages.lastChild.previousSibling); 
-            }
-            messages.removeChild(div);
-            await fetch(`/delete_last/${sessionId}`, { method: "DELETE" });
-        };
-        div.appendChild(delBtn);
-    }
     messages.appendChild(div);
     messages.scrollTop = messages.scrollHeight;
-}
-
-async function askNextQuestion() {
-    if(questionIndex < questions.length){
-        appendMessage(questions[questionIndex], "ai");
-        questionIndex++;
-        isWaitingForReply = false;
-        sendButton.disabled = false;
-    }
 }
 
 async function sendMessage(userMessage){
     status.style.display = "block";
     try{
         const response = await fetch("/chat", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ message: userMessage, session_id: sessionId })
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({ message: userMessage, session_id: sessionId })
         });
         const data = await response.json();
         appendMessage(data.response, "ai");
-    } catch(err){
+    }catch(err){
         appendMessage("通信エラーが発生しました。", "ai");
-    } finally {
-        status.style.display = "none";
-        isWaitingForReply = false;
-        sendButton.disabled = false;
+    }finally{
+        status.style.display="none";
+        isWaitingForReply=false;
+        sendButton.disabled=false;
     }
 }
 
-// 初回起動時にAIから話しかける
-window.onload = () => {
-    askNextQuestion();
+// 初回ロードで履歴取得
+window.onload = async ()=>{
+    try{
+        const res = await fetch(`/history/${sessionId}`);
+        const data = await res.json();
+        data.history.forEach(msg=>{
+            appendMessage(msg.content, msg.role);
+        });
+        questionIndex = data.last_question_index + 1;
+        if(questionIndex < questions.length){
+            appendMessage(questions[questionIndex], "ai");
+        }
+    }catch(e){
+        console.error(e);
+    }
 };
 
 form.addEventListener("submit", async (e)=>{
     e.preventDefault();
     if(isWaitingForReply || !input.value.trim()) return;
-
     const userMessage = input.value.trim();
     appendMessage(userMessage, "user");
-    input.value = "";
-    isWaitingForReply = true;
-    sendButton.disabled = true;
+    input.value="";
+    isWaitingForReply=true;
+    sendButton.disabled=true;
 
     if(questionIndex < questions.length){
         // 質問モード
-        await fetch("/chat", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ message: userMessage, session_id: sessionId })
-        });
-        askNextQuestion();
-    } else {
-        // 通常会話モード
+        await sendMessage(userMessage);
+        questionIndex++;
+        if(questionIndex < questions.length){
+            appendMessage(questions[questionIndex], "ai");
+        }
+        isWaitingForReply=false;
+        sendButton.disabled=false;
+    }else{
+        // 通常会話
         sendMessage(userMessage);
     }
 });
