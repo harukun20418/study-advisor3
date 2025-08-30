@@ -99,7 +99,8 @@ def chat(request: ChatRequest):
     system_prompt = (
         "あなたは勉強アドバイザーです。スクリーンタイムや勉強習慣に寄り添い、"
         "ユーザーに質問を投げかけながらアドバイスしてください。"
-        "文体は親しみやすく、丁寧に。"
+        "文体は親しみやすく、丁寧に。１文１文を短くして、二行までで答える"
+        "ユーザーに質問をしたりしてください"
     )
 
     ai_messages = [{"role": "system", "content": system_prompt}, *messages]
