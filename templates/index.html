@@ -3,9 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="manifest" href="/static/manifest.json">
 <title>勉強アドバイザーAI</title>
-<link rel="stylesheet" href="/static/style.css">
 <style>
 body { font-family: Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; }
 .chat-container { display: flex; flex-direction: column; flex: 1; padding: 10px; overflow-y: auto; }
@@ -51,7 +49,7 @@ const questions = [
     "勉強はコツコツやる派ですかそれとも一夜漬けタイプ？"
 ];
 
-function appendMessage(content, sender, msgId=null) {
+function appendMessage(content, sender) {
     const div = document.createElement("div");
     div.classList.add("message", sender);
     div.textContent = content;
@@ -60,12 +58,11 @@ function appendMessage(content, sender, msgId=null) {
         delBtn.textContent = "×";
         delBtn.className = "delete-btn";
         delBtn.onclick = async () => {
-            // 直前メッセージとAI返信削除
             if(messages.lastChild.previousSibling){
                 messages.removeChild(messages.lastChild.previousSibling); 
             }
             messages.removeChild(div);
-            await fetch(/delete_last/${sessionId}, { method: "DELETE" });
+            await fetch(`/delete_last/${sessionId}`, { method: "DELETE" });
         };
         div.appendChild(delBtn);
     }
@@ -101,10 +98,7 @@ async function sendMessage(userMessage){
     }
 }
 
-// 初回起動時にAIから話しかける
-window.onload = () => {
-    askNextQuestion();
-};
+window.onload = () => askNextQuestion();
 
 form.addEventListener("submit", async (e)=>{
     e.preventDefault();
@@ -117,7 +111,6 @@ form.addEventListener("submit", async (e)=>{
     sendButton.disabled = true;
 
     if(questionIndex < questions.length){
-        // 質問モード
         await fetch("/chat", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -125,7 +118,6 @@ form.addEventListener("submit", async (e)=>{
         });
         askNextQuestion();
     } else {
-        // 通常会話モード
         sendMessage(userMessage);
     }
 });
