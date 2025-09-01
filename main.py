@@ -40,6 +40,7 @@ class ChatSession(Base):
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(String, unique=True, index=True)
     title = Column(String)
+    question_index = Column(Integer, default=0)  # 進行状況を保存
 
 Base.metadata.create_all(bind=engine)
 
@@ -53,6 +54,7 @@ class ChatSessionCreate(ChatSessionBase):
 
 class ChatSessionResponse(ChatSessionBase):
     id: int
+    question_index: int
     class Config:
         orm_mode = True
 
@@ -66,11 +68,51 @@ class ChatRequest(BaseModel):
     message: str
     session_id: str
 
+# --- 質問リスト ---
+QUESTIONS = [
+    "こんにちは！私はあなたの勉強をサポートします！まずは5つの質問であなたのことを教えてください",
+    "あなたのことは何と呼べばいいですか？",
+    "了解です！何のための勉強をサポートしてほしいですか？(例: 試験対策、受験勉強など)",
+    "なるほど、普段の1日の勉強時間はどのくらいですか？",
+    "スマホは１日どれくらい使いますか？",
+    "勉強はコツコツやる派ですかそれとも一夜漬けタイプ？"
+]
+
 # --- チャットAPI（会話＋保存） ---
 @app.post("/chat")
 def chat(request: ChatRequest):
     db = SessionLocal()
 
+    # セッションを確認 or 作成
+    db_session = db.query(ChatSession).filter(ChatSession.session_id == request.session_id).first()
+    if not db_session:
+        db_session = ChatSession(session_id=request.session_id, title=f"セッション {request.session_id}")
+        db.add(db_session)
+        db.commit()
+        db.refresh(db_session)
+
+    # 質問モードかどうか判定
+    if db_session.question_index < len(QUESTIONS):
+        # ユーザーの回答を保存
+        db.add(ChatLog(session_id=request.session_id, role="user", content=request.message))
+        db.commit()
+
+        # 次の質問を返す
+        db_session.question_index += 1
+        db.commit()
+
+        if db_session.question_index < len(QUESTIONS):
+            next_q = QUESTIONS[db_session.question_index]
+        else:
+            next_q = "ありがとう！これで質問は終わりです。これからは自由に話しかけてね。"
+
+        # AI(質問)を保存
+        db.add(ChatLog(session_id=request.session_id, role="assistant", content=next_q))
+        db.commit()
+
+        return {"response": next_q}
+
+    # --- 通常会話モード ---
     # 履歴取得（そのセッションの最新10件）
     history = db.query(ChatLog).filter(
         ChatLog.session_id == request.session_id
