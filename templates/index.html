@@ -11,8 +11,6 @@ body { font-family: Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 
 .message { max-width: 70%; padding: 10px 15px; border-radius: 20px; word-wrap: break-word; position: relative; }
 .user { background-color: #4a90e2; color: white; align-self: flex-end; border-bottom-right-radius: 0; }
 .ai { background-color: #e0e0e0; color: black; align-self: flex-start; border-bottom-left-radius: 0; }
-.delete-btn { position: absolute; bottom: 2px; left: 2px; background: red; color: white; border: none; border-radius: 50%; width: 20px; height: 20px; display: none; cursor: pointer; font-size: 12px; }
-.message.user:hover .delete-btn { display: block; }
 .chat-form { display: flex; padding: 10px; gap: 10px; border-top: 1px solid #ccc; background: white; }
 .chat-form input { flex: 1; padding: 10px; border-radius: 20px; border: 1px solid #ccc; }
 .chat-form button { padding: 10px 20px; border-radius: 20px; border: none; background-color: #4a90e2; color: white; font-weight: bold; cursor: pointer; }
@@ -25,7 +23,7 @@ body { font-family: Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 
     <div id="status" class="status">AIが返信中です...</div>
     <div id="messages" class="messages"></div>
     <form id="chat-form" class="chat-form">
-        <input type="text" id="chat-input" placeholder="メッセージを入力..." />
+        <input type="text" id="chat-input" placeholder="メッセージを入力..." autocomplete="off"/>
         <button type="submit" id="send-button">送信</button>
     </form>
 </div>
@@ -36,103 +34,63 @@ const input = document.getElementById("chat-input");
 const messages = document.getElementById("messages");
 const sendButton = document.getElementById("send-button");
 const status = document.getElementById("status");
-let isWaitingForReply = false;
-let sessionId = "default-session";
 
-// localStorageから読み込み
-let questionIndex = parseInt(localStorage.getItem("questionIndex")) || 0;
+let sessionId = "default-session";  // 必要に応じて動的に変更可能
+let isWaiting = false;
 
-const questions = [
-    "こんにちは！私はあなたの勉強をサポートします！まずは5つの質問であなたのことを教えてください",
-    "あなたのことは何と呼べばいいですか？",
-    "了解です！何のための勉強をサポートしてほしいですか？(例: 試験対策、受験勉強など)",
-    "なるほど、普段の1日の勉強時間はどのくらいですか？",
-    "スマホは１日どれくらい使いますか？",
-    "勉強はコツコツやる派ですかそれとも一夜漬けタイプ？"
-];
-
-function saveProgress() {
-    localStorage.setItem("questionIndex", questionIndex);
-}
-
+// メッセージ表示
 function appendMessage(content, sender) {
     const div = document.createElement("div");
-    div.classList.add("message", sender);
+    div.className = `message ${sender}`;
     div.textContent = content;
-    if(sender === "user") {
-        const delBtn = document.createElement("button");
-        delBtn.textContent = "×";
-        delBtn.className = "delete-btn";
-        delBtn.onclick = async () => {
-            if(messages.lastChild.previousSibling){
-                messages.removeChild(messages.lastChild.previousSibling); 
-            }
-            messages.removeChild(div);
-            await fetch(`/delete_last/${sessionId}`, { method: "DELETE" });
-        };
-        div.appendChild(delBtn);
-    }
     messages.appendChild(div);
     messages.scrollTop = messages.scrollHeight;
 }
 
-async function askNextQuestion() {
-    if(questionIndex < questions.length){
-        appendMessage(questions[questionIndex], "ai");
-        questionIndex++;
-        saveProgress(); // 保存
-        isWaitingForReply = false;
-        sendButton.disabled = false;
+// 過去履歴取得
+async function loadHistory() {
+    try {
+        const res = await fetch(`/history/${sessionId}`);
+        const data = await res.json();
+        data.history.forEach(h => appendMessage(h.content, h.role === "user" ? "user" : "ai"));
+    } catch (e) {
+        console.error("履歴取得エラー", e);
     }
 }
 
-async function sendMessage(userMessage){
+// メッセージ送信
+async function sendMessage(msg) {
+    if (!msg.trim()) return;
+    appendMessage(msg, "user");
+    input.value = "";
+    isWaiting = true;
+    sendButton.disabled = true;
     status.style.display = "block";
-    try{
-        const response = await fetch("/chat", {
+
+    try {
+        const res = await fetch("/chat", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ message: userMessage, session_id: sessionId })
+            body: JSON.stringify({ message: msg, session_id: sessionId })
         });
-        const data = await response.json();
+        const data = await res.json();
         appendMessage(data.response, "ai");
-    } catch(err){
+    } catch (e) {
         appendMessage("通信エラーが発生しました。", "ai");
     } finally {
-        status.style.display = "none";
-        isWaitingForReply = false;
+        isWaiting = false;
         sendButton.disabled = false;
+        status.style.display = "none";
     }
 }
 
-// ページ読み込み時に前回の進行状況があれば続きから
-window.onload = () => {
-    if(questionIndex < questions.length){
-        askNextQuestion();
-    }
-};
-
-form.addEventListener("submit", async (e)=>{
+form.addEventListener("submit", (e) => {
     e.preventDefault();
-    if(isWaitingForReply || !input.value.trim()) return;
-
-    const userMessage = input.value.trim();
-    appendMessage(userMessage, "user");
-    input.value = "";
-    isWaitingForReply = true;
-    sendButton.disabled = true;
-
-    if(questionIndex < questions.length){
-        await fetch("/chat", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ message: userMessage, session_id: sessionId })
-        });
-        askNextQuestion();
-    } else {
-        sendMessage(userMessage);
-    }
+    if (!isWaiting && input.value.trim()) sendMessage(input.value);
 });
+
+// 初期ロードで履歴を表示
+window.onload = () => loadHistory();
 </script>
 </body>
 </html>

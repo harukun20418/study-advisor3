@@ -7,46 +7,20 @@ from sqlalchemy import create_engine, Column, Integer, String, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import requests
-from typing import List
-import sqlite3
 import os
-from sqlalchemy import inspect
-#import sqlite3
 
-# --- FastAPIアプリの作成 ---
+# --- FastAPIアプリ ---
 app = FastAPI()
-
-# --- デバッグ用 ---
-@app.get("/debug/db")
-def debug_db():
-    inspector = inspect(engine)
-    tables = inspector.get_table_names()
-    return {"tables": tables}
-
-#conn = sqlite3.connect("chat.db")
-#cursor = conn.cursor()
-
-# 古いテーブルを削除
-#cursor.execute("DROP TABLE IF EXISTS messages;")
-#cursor.execute("DROP TABLE IF EXISTS sessions;")
-
-#conn.commit()
-#conn.close()
-#print("古いテーブルを削除しました。")
-
-# staticフォルダを公開
 app.mount("/static", StaticFiles(directory="static"), name="static")
-
-# --- テンプレートの設定 ---
 templates = Jinja2Templates(directory="templates")
 
-# --- SQLiteデータベースの設定 ---
+# --- DB設定 ---
 DATABASE_URL = "sqlite:///./chat.db"
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(bind=engine)
 Base = declarative_base()
 
-# --- チャットログのデータベースモデル ---
+# --- DBモデル ---
 class ChatLog(Base):
     __tablename__ = "chat_logs"
     id = Column(Integer, primary_key=True, index=True)
@@ -54,39 +28,31 @@ class ChatLog(Base):
     role = Column(String)
     content = Column(Text)
 
-# --- セッションのモデル ---
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(String, unique=True, index=True)
     title = Column(String)
-    question_index = Column(Integer, default=0)  # 進行状況を保存
+    question_index = Column(Integer, default=0)
 
 Base.metadata.create_all(bind=engine)
 
-# --- Pydantic モデル ---
-class ChatSessionBase(BaseModel):
-    session_id: str
-    title: str
-
-class ChatSessionCreate(ChatSessionBase):
-    pass
-
-class ChatSessionResponse(ChatSessionBase):
-    id: int
-    question_index: int
-    class Config:
-        orm_mode = True
-
-# --- ルート（トップページ） ---
-@app.get("/", response_class=HTMLResponse)
-async def read_index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
-
-# --- リクエストの構造 ---
+# --- Pydantic ---
 class ChatRequest(BaseModel):
     message: str
     session_id: str
+
+class ChatSessionCreate(BaseModel):
+    session_id: str
+    title: str
+
+class ChatSessionResponse(BaseModel):
+    id: int
+    session_id: str
+    title: str
+    question_index: int
+    class Config:
+        orm_mode = True
 
 # --- 質問リスト ---
 QUESTIONS = [
@@ -98,101 +64,84 @@ QUESTIONS = [
     "勉強はコツコツやる派ですかそれとも一夜漬けタイプ？"
 ]
 
-# --- チャットAPI（会話＋保存） ---
+# --- トップページ ---
+@app.get("/", response_class=HTMLResponse)
+async def read_index(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
+
+# --- チャットAPI ---
 @app.post("/chat")
 def chat(request: ChatRequest):
     db = SessionLocal()
-
-    # セッションを確認 or 作成
-    db_session = db.query(ChatSession).filter(ChatSession.session_id == request.session_id).first()
-    if not db_session:
-        db_session = ChatSession(session_id=request.session_id, title=f"セッション {request.session_id}")
-        db.add(db_session)
+    # セッション確認 or 作成
+    session_obj = db.query(ChatSession).filter(ChatSession.session_id == request.session_id).first()
+    if not session_obj:
+        session_obj = ChatSession(session_id=request.session_id, title=f"セッション {request.session_id}")
+        db.add(session_obj)
         db.commit()
-        db.refresh(db_session)
+        db.refresh(session_obj)
 
-    # 質問モードかどうか判定
-    if db_session.question_index < len(QUESTIONS):
-        # ユーザーの回答を保存
+    # --- 質問モード ---
+    if session_obj.question_index < len(QUESTIONS):
+        # ユーザー回答保存
         db.add(ChatLog(session_id=request.session_id, role="user", content=request.message))
         db.commit()
 
-        # 次の質問を返す
-        db_session.question_index += 1
+        # 次の質問を取得
+        response_text = QUESTIONS[session_obj.question_index]
+        session_obj.question_index += 1
         db.commit()
 
-        if db_session.question_index < len(QUESTIONS):
-            next_q = QUESTIONS[db_session.question_index]
-        else:
-            next_q = "ありがとう！これで質問は終わりです。これからは自由に話しかけてね。"
-
-        # AI(質問)を保存
-        db.add(ChatLog(session_id=request.session_id, role="assistant", content=next_q))
+        # AI質問として保存
+        db.add(ChatLog(session_id=request.session_id, role="assistant", content=response_text))
         db.commit()
 
-        return {"response": next_q}
+        return {"response": response_text}
 
-    # --- 通常会話モード ---
-    # 履歴取得（そのセッションの最新10件）
-    history = db.query(ChatLog).filter(
-        ChatLog.session_id == request.session_id
-    ).order_by(ChatLog.id.desc()).limit(10).all()
-    history = list(reversed(history))  # 昇順に並べ替え
+    # --- 自由会話モード ---
+    history = db.query(ChatLog).filter(ChatLog.session_id == request.session_id).order_by(ChatLog.id.asc()).all()
     messages = [{"role": log.role, "content": log.content} for log in history]
 
-    # ユーザーの発言を保存
+    # ユーザー発言保存
     db.add(ChatLog(session_id=request.session_id, role="user", content=request.message))
     db.commit()
 
-    # OpenRouter API
+    # OpenRouter API 呼び出し
     headers = {
         "Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}",
         "Content-Type": "application/json"
     }
-
     data = {
         "model": "openai/gpt-3.5-turbo",
         "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "あなたは勉強のアドバイザーです。ユーザーの気持ちに寄り添い、"
-                    "共感しながら質問やアドバイスをしてください。堅苦しすぎず、"
-                    "フレンドリーで頼れる先生のような雰囲気を意識してください。"
-                )
-            },
+            {"role": "system", "content": "あなたは勉強のアドバイザーです。共感しつつ柔らかくアドバイスしてください。"},
             *messages,
             {"role": "user", "content": request.message}
         ]
     }
-
-    response = requests.post("https://openrouter.ai/api/v1/chat/completions",
-                             headers=headers, json=data)
+    response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
 
     if response.status_code != 200:
-        return {"response": f"APIエラー: {response.status_code} - {response.text}"}
+        return {"response": f"APIエラー: {response.status_code}"}
 
     try:
         assistant_reply = response.json()["choices"][0]["message"]["content"]
-    except Exception as e:
-        return {"response": f"AIの返答取得エラー: {e}"}
+    except:
+        assistant_reply = "AIの返答取得エラー"
 
-    # AIの返答を保存
     db.add(ChatLog(session_id=request.session_id, role="assistant", content=assistant_reply))
     db.commit()
 
     return {"response": assistant_reply}
 
-# --- 会話履歴取得API ---
+# --- 履歴取得 ---
 @app.get("/history/{session_id}")
 def get_history(session_id: str):
     db = SessionLocal()
-    history = db.query(ChatLog).filter(
-        ChatLog.session_id == session_id
-    ).order_by(ChatLog.id.asc()).all()
-    return {"history": [{"role": h.role, "content": h.content} for h in history]}
+    logs = db.query(ChatLog).filter(ChatLog.session_id == session_id).order_by(ChatLog.id.asc()).all()
+    return {"history": [{"role": log.role, "content": log.content} for log in logs]}
 
-# --- セッション作成API ---
+# --- セッション作成 ---
 @app.post("/sessions", response_model=ChatSessionResponse)
 def create_session(session: ChatSessionCreate):
     db = SessionLocal()
@@ -202,32 +151,8 @@ def create_session(session: ChatSessionCreate):
     db.refresh(db_session)
     return db_session
 
-# --- セッション一覧の取得 ---
+# --- セッション一覧 ---
 @app.get("/sessions", response_model=List[ChatSessionResponse])
-def get_sessions_api():
+def get_sessions():
     db = SessionLocal()
-    sessions = db.query(ChatSession).all()
-    return sessions
-
-# --- セッション一覧画面（HTML） ---
-@app.get("/sessions", response_class=HTMLResponse)
-async def get_sessions_html(request: Request):
-    db = SessionLocal()
-    sessions = db.query(ChatLog.session_id).distinct().all()
-    session_data = [{"session_id": session[0], "title": f"セッション {session[0]}"} for session in sessions]
-    return templates.TemplateResponse("sessions.html", {"request": request, "sessions": session_data})
-
-# --- DBチェック用 ---
-def check_chat_logs():
-    conn = sqlite3.connect('chat.db')
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM chat_logs")
-    logs = cursor.fetchall()
-    if logs:
-        for log in logs:
-            print(log)
-    else:
-        print("No logs found.")
-    conn.close()
-
-check_chat_logs()
+    return db.query(ChatSession).all()
