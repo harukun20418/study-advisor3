@@ -17,7 +17,6 @@ templates = Jinja2Templates(directory="templates")
 
 # --- DB設定 ---
 DATABASE_URL = "sqlite:///./chat.db"
-
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(bind=engine)
 Base = declarative_base()
@@ -37,7 +36,7 @@ class ChatSession(Base):
     title = Column(String)
     question_index = Column(Integer, default=0)
 
-# 一度だけテーブル作成
+# --- テーブル作成（存在しなければ作成） ---
 Base.metadata.create_all(bind=engine)
 
 # --- Pydantic ---
@@ -76,93 +75,86 @@ async def read_index(request: Request):
 @app.post("/chat")
 def chat(request: ChatRequest):
     db = SessionLocal()
-    try:
-        # セッション確認 or 作成
-        session_obj = db.query(ChatSession).filter(ChatSession.session_id == request.session_id).first()
-        if not session_obj:
-            session_obj = ChatSession(session_id=request.session_id, title=f"セッション {request.session_id}")
-            db.add(session_obj)
-            db.commit()
-            db.refresh(session_obj)
+    # セッション確認 or 作成
+    session_obj = db.query(ChatSession).filter(ChatSession.session_id == request.session_id).first()
+    if not session_obj:
+        session_obj = ChatSession(session_id=request.session_id, title=f"セッション {request.session_id}")
+        db.add(session_obj)
+        db.commit()
+        db.refresh(session_obj)
 
-        # --- 質問モード ---
-        if session_obj.question_index < len(QUESTIONS):
-            db.add(ChatLog(session_id=request.session_id, role="user", content=request.message))
-            db.commit()
-
-            response_text = QUESTIONS[session_obj.question_index]
-            session_obj.question_index += 1
-            db.commit()
-
-            db.add(ChatLog(session_id=request.session_id, role="assistant", content=response_text))
-            db.commit()
-            return {"response": response_text}
-
-        # --- 自由会話モード ---
-        history = db.query(ChatLog).filter(ChatLog.session_id == request.session_id).order_by(ChatLog.id.asc()).all()
-        messages = [{"role": log.role, "content": log.content} for log in history]
-
+    # --- 質問モード ---
+    if session_obj.question_index < len(QUESTIONS):
         db.add(ChatLog(session_id=request.session_id, role="user", content=request.message))
         db.commit()
 
-        # OpenRouter API 呼び出し
-        headers = {
-            "Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}",
-            "Content-Type": "application/json"
-        }
-        data = {
-            "model": "openai/gpt-3.5-turbo",
-            "messages": [
-                {"role": "system", "content": "あなたは勉強のアドバイザーです。共感しつつ柔らかくアドバイスしてください。"},
-                *messages,
-                {"role": "user", "content": request.message}
-            ]
-        }
-        response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
-
-        if response.status_code != 200:
-            assistant_reply = f"APIエラー: {response.status_code}"
-        else:
-            try:
-                assistant_reply = response.json()["choices"][0]["message"]["content"]
-            except:
-                assistant_reply = "AIの返答取得エラー"
-
-        db.add(ChatLog(session_id=request.session_id, role="assistant", content=assistant_reply))
+        response_text = QUESTIONS[session_obj.question_index]
+        session_obj.question_index += 1
         db.commit()
 
-        return {"response": assistant_reply}
-    finally:
-        db.close()
+        db.add(ChatLog(session_id=request.session_id, role="assistant", content=response_text))
+        db.commit()
+
+        return {"response": response_text}
+
+    # --- 自由会話モード ---
+    history = db.query(ChatLog).filter(ChatLog.session_id == request.session_id).order_by(ChatLog.id.asc()).all()
+    messages = [{"role": log.role, "content": log.content} for log in history]
+
+    db.add(ChatLog(session_id=request.session_id, role="user", content=request.message))
+    db.commit()
+
+    headers = {
+        "Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "model": "openai/gpt-3.5-turbo",
+        "messages": [
+            {"role": "system", "content": "あなたは勉強のアドバイザーです。共感しつつ柔らかくアドバイスしてください。"},
+            *messages,
+            {"role": "user", "content": request.message}
+        ]
+    }
+    response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
+
+    if response.status_code != 200:
+        return {"response": f"APIエラー: {response.status_code}"}
+
+    try:
+        assistant_reply = response.json()["choices"][0]["message"]["content"]
+    except:
+        assistant_reply = "AIの返答取得エラー"
+
+    db.add(ChatLog(session_id=request.session_id, role="assistant", content=assistant_reply))
+    db.commit()
+    db.close()
+
+    return {"response": assistant_reply}
 
 # --- 履歴取得 ---
 @app.get("/history/{session_id}")
 def get_history(session_id: str):
     db = SessionLocal()
-    try:
-        logs = db.query(ChatLog).filter(ChatLog.session_id == session_id).order_by(ChatLog.id.asc()).all()
-        return {"history": [{"role": log.role, "content": log.content} for log in logs]}
-    finally:
-        db.close()
+    logs = db.query(ChatLog).filter(ChatLog.session_id == session_id).order_by(ChatLog.id.asc()).all()
+    db.close()
+    return {"history": [{"role": log.role, "content": log.content} for log in logs]}
 
 # --- セッション作成 ---
 @app.post("/sessions", response_model=ChatSessionResponse)
 def create_session(session: ChatSessionCreate):
     db = SessionLocal()
-    try:
-        db_session = ChatSession(session_id=session.session_id, title=session.title)
-        db.add(db_session)
-        db.commit()
-        db.refresh(db_session)
-        return db_session
-    finally:
-        db.close()
+    db_session = ChatSession(session_id=session.session_id, title=session.title)
+    db.add(db_session)
+    db.commit()
+    db.refresh(db_session)
+    db.close()
+    return db_session
 
 # --- セッション一覧 ---
 @app.get("/sessions", response_model=List[ChatSessionResponse])
 def get_sessions():
     db = SessionLocal()
-    try:
-        return db.query(ChatSession).all()
-    finally:
-        db.close()
+    sessions = db.query(ChatSession).all()
+    db.close()
+    return sessions
