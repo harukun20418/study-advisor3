@@ -11,9 +11,9 @@ body { font-family: Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 
 .message { max-width: 70%; padding: 10px 15px; border-radius: 20px; word-wrap: break-word; position: relative; }
 .user { background-color: #4a90e2; color: white; align-self: flex-end; border-bottom-right-radius: 0; }
 .ai { background-color: #e0e0e0; color: black; align-self: flex-start; border-bottom-left-radius: 0; }
-.chat-form { display: flex; padding: 10px; gap: 10px; border-top: 1px solid #ccc; background: white; }
-.chat-form input { flex: 1; padding: 10px; border-radius: 20px; border: 1px solid #ccc; }
-.chat-form button { padding: 10px 20px; border-radius: 20px; border: none; background-color: #4a90e2; color: white; font-weight: bold; cursor: pointer; }
+.chat-form { display: flex; flex-direction: column; padding: 10px; gap: 5px; border-top: 1px solid #ccc; background: white; }
+.chat-form input, .chat-form button { padding: 10px; border-radius: 20px; border: 1px solid #ccc; }
+.chat-form button { background-color: #4a90e2; color: white; font-weight: bold; cursor: pointer; border: none; }
 .chat-form button:disabled { background-color: #aaa; cursor: not-allowed; }
 .status { text-align: center; font-size: 14px; color: #666; margin-bottom: 5px; display: none; }
 </style>
@@ -22,25 +22,12 @@ body { font-family: Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 
 <div id="chat-container" class="chat-container">
     <div id="status" class="status">AIが返信中です...</div>
     <div id="messages" class="messages"></div>
-
     <form id="chat-form" class="chat-form">
         <input type="text" id="chat-input" placeholder="メッセージを入力..." autocomplete="off"/>
+        <input type="number" id="study-time" placeholder="今日の勉強時間(時間)" min="0"/>
+        <input type="number" id="phone-time" placeholder="今日のスマホ時間(時間)" min="0"/>
         <button type="submit" id="send-button">送信</button>
     </form>
-
-    <div style="padding:10px; background:#fff; border-top:1px solid #ccc;">
-        <h4>スクリーンタイム入力</h4>
-        <input type="number" id="study-time" placeholder="勉強時間(時間)" step="0.1"/>
-        <input type="number" id="sns-time" placeholder="SNS時間(時間)" step="0.1"/>
-        <input type="number" id="game-time" placeholder="ゲーム時間(時間)" step="0.1"/>
-        <button id="send-screen">送信</button>
-    </div>
-
-    <div style="padding:10px; background:#fff; border-top:1px solid #ccc;">
-        <h4>スケジュール相談</h4>
-        <input type="text" id="schedule-msg" placeholder="希望を入力"/>
-        <button id="ask-schedule">相談</button>
-    </div>
 </div>
 
 <script>
@@ -49,10 +36,13 @@ const input = document.getElementById("chat-input");
 const messages = document.getElementById("messages");
 const sendButton = document.getElementById("send-button");
 const status = document.getElementById("status");
+const studyInput = document.getElementById("study-time");
+const phoneInput = document.getElementById("phone-time");
 
-let sessionId = "default-session";
+let sessionId = "default-session";  // 必要に応じて動的に変更可能
 let isWaiting = false;
 
+// メッセージ表示
 function appendMessage(content, sender) {
     const div = document.createElement("div");
     div.className = `message ${sender}`;
@@ -61,18 +51,28 @@ function appendMessage(content, sender) {
     messages.scrollTop = messages.scrollHeight;
 }
 
+// 過去履歴取得
 async function loadHistory() {
     try {
         const res = await fetch(`/history/${sessionId}`);
         const data = await res.json();
         data.history.forEach(h => appendMessage(h.content, h.role === "user" ? "user" : "ai"));
-    } catch (e) { console.error("履歴取得エラー", e); }
+    } catch (e) {
+        console.error("履歴取得エラー", e);
+    }
 }
 
+// メッセージ送信
 async function sendMessage(msg) {
     if (!msg.trim()) return;
     appendMessage(msg, "user");
+    const studyTime = studyInput.value ? parseInt(studyInput.value) : 0;
+    const phoneTime = phoneInput.value ? parseInt(phoneInput.value) : 0;
+
     input.value = "";
+    studyInput.value = "";
+    phoneInput.value = "";
+
     isWaiting = true;
     sendButton.disabled = true;
     status.style.display = "block";
@@ -81,7 +81,12 @@ async function sendMessage(msg) {
         const res = await fetch("/chat", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ message: msg, session_id: sessionId })
+            body: JSON.stringify({ 
+                message: msg, 
+                session_id: sessionId, 
+                study_time: studyTime, 
+                phone_time: phoneTime 
+            })
         });
         const data = await res.json();
         appendMessage(data.response, "ai");
@@ -99,35 +104,8 @@ form.addEventListener("submit", (e) => {
     if (!isWaiting && input.value.trim()) sendMessage(input.value);
 });
 
-// --- スクリーンタイム送信 ---
-document.getElementById("send-screen").addEventListener("click", async () => {
-    const study = parseFloat(document.getElementById("study-time").value) || 0;
-    const sns = parseFloat(document.getElementById("sns-time").value) || 0;
-    const game = parseFloat(document.getElementById("game-time").value) || 0;
-
-    try {
-        await fetch("/screen_time", {
-            method: "POST",
-            body: new URLSearchParams({ session_id: sessionId, study_time: study, sns_time: sns, game_time: game })
-        });
-        alert("スクリーンタイムを送信しました！");
-    } catch (e) {
-        alert("送信エラー");
-    }
-});
-
-// --- スケジュール相談 ---
-document.getElementById("ask-schedule").addEventListener("click", async () => {
-    const msg = document.getElementById("schedule-msg").value;
-    if (!msg.trim()) return;
-
-    appendMessage(msg, "user");
-    document.getElementById("schedule-msg").value = "";
-
-    try {
-        const res = await fetch("/plan_schedule", {
-            method: "POST",
-            body: new URLSearchParams({ session_id: sessionId, message: msg })
-        });
-        const data = await res.json();
-        appendMessage(data.response
+// 初期ロードで履歴を表示
+window.onload = () => loadHistory();
+</script>
+</body>
+</html>

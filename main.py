@@ -1,15 +1,14 @@
-from fastapi import FastAPI, Request, Form
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
-from sqlalchemy import create_engine, Column, Integer, String, Text, Float, Date
+from sqlalchemy import create_engine, Column, Integer, String, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import requests
 import os
 from typing import List
-from datetime import date
 
 # --- FastAPIアプリ ---
 app = FastAPI()
@@ -36,22 +35,9 @@ class ChatSession(Base):
     session_id = Column(String, unique=True, index=True)
     title = Column(String)
     question_index = Column(Integer, default=0)
-
-class ScreenTimeLog(Base):
-    __tablename__ = "screen_time_logs"
-    id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(String, index=True)
-    date = Column(Date)
-    study_time = Column(Float, default=0.0)
-    sns_time = Column(Float, default=0.0)
-    game_time = Column(Float, default=0.0)
-
-class SchedulePlan(Base):
-    __tablename__ = "schedule_plans"
-    id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(String, index=True)
-    date = Column(Date)
-    plan_json = Column(Text)
+    username = Column(String, default="")
+    study_time = Column(Integer, default=0)
+    phone_time = Column(Integer, default=0)
 
 # --- テーブル作成 ---
 Base.metadata.create_all(bind=engine)
@@ -60,6 +46,8 @@ Base.metadata.create_all(bind=engine)
 class ChatRequest(BaseModel):
     message: str
     session_id: str
+    study_time: int = 0
+    phone_time: int = 0
 
 class ChatSessionCreate(BaseModel):
     session_id: str
@@ -70,13 +58,11 @@ class ChatSessionResponse(BaseModel):
     session_id: str
     title: str
     question_index: int
+    username: str
+    study_time: int
+    phone_time: int
     class Config:
         orm_mode = True
-
-class ScreenTimeInput(BaseModel):
-    study_time: float
-    sns_time: float
-    game_time: float
 
 # --- 質問リスト ---
 QUESTIONS = [
@@ -84,8 +70,8 @@ QUESTIONS = [
     "あなたのことは何と呼べばいいですか？",
     "了解です！何のための勉強をサポートしてほしいですか？(例: 試験対策、受験勉強など)",
     "なるほど、普段の1日の勉強時間はどのくらいですか？",
-    "スマホは１日どれくらい使いますか？",
-    "勉強はコツコツやる派ですかそれとも一夜漬けタイプ？"
+    "スマホは1日どれくらい使いますか？",
+    "勉強はコツコツ派ですか、それとも一夜漬けタイプですか？"
 ]
 
 # --- トップページ ---
@@ -104,22 +90,40 @@ def chat(request: ChatRequest):
         db.commit()
         db.refresh(session_obj)
 
+    # --- 質問モード ---
     if session_obj.question_index < len(QUESTIONS):
         db.add(ChatLog(session_id=request.session_id, role="user", content=request.message))
+        db.commit()
+
+        if session_obj.question_index == 1:
+            session_obj.username = request.message
+        if session_obj.question_index == 3:
+            session_obj.study_time = request.study_time
+        if session_obj.question_index == 4:
+            session_obj.phone_time = request.phone_time
         db.commit()
 
         response_text = QUESTIONS[session_obj.question_index]
         session_obj.question_index += 1
         db.commit()
 
+        if session_obj.username:
+            response_text = response_text.replace("あなた", session_obj.username)
+
         db.add(ChatLog(session_id=request.session_id, role="assistant", content=response_text))
         db.commit()
-
         db.close()
         return {"response": response_text}
 
+    # --- 自由会話モード ---
     history = db.query(ChatLog).filter(ChatLog.session_id == request.session_id).order_by(ChatLog.id.asc()).all()
     messages = [{"role": log.role, "content": log.content} for log in history]
+
+    if request.study_time:
+        session_obj.study_time = request.study_time
+    if request.phone_time:
+        session_obj.phone_time = request.phone_time
+    db.commit()
 
     db.add(ChatLog(session_id=request.session_id, role="user", content=request.message))
     db.commit()
@@ -128,18 +132,26 @@ def chat(request: ChatRequest):
         "Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}",
         "Content-Type": "application/json"
     }
+    system_prompt = (
+        f"あなたは勉強アドバイザーです。ユーザーの名前は {session_obj.username or 'ユーザー'} です。"
+        f"今日の勉強時間は {session_obj.study_time} 時間、スマホ時間は {session_obj.phone_time} 時間です。"
+        "共感しつつ、短く1〜2文で質問や提案を出し、ユーザーに確認しながらスケジュールを決める会話形式で返答してください。"
+    )
     data = {
         "model": "openai/gpt-3.5-turbo",
         "messages": [
-            {"role": "system", "content": "あなたは勉強のアドバイザーです。共感しつつ柔らかくアドバイスしてください。"},
+            {"role": "system", "content": system_prompt},
             *messages,
             {"role": "user", "content": request.message}
-        ]
+        ],
+        "max_tokens": 150
     }
     response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
+
     if response.status_code != 200:
         db.close()
         return {"response": f"APIエラー: {response.status_code}"}
+
     try:
         assistant_reply = response.json()["choices"][0]["message"]["content"]
     except:
@@ -176,57 +188,3 @@ def get_sessions():
     sessions = db.query(ChatSession).all()
     db.close()
     return sessions
-
-# --- スクリーンタイム送信 ---
-@app.post("/screen_time")
-def send_screen_time(data: ScreenTimeInput, session_id: str = Form(...)):
-    db = SessionLocal()
-    log = ScreenTimeLog(
-        session_id=session_id,
-        date=date.today(),
-        study_time=data.study_time,
-        sns_time=data.sns_time,
-        game_time=data.game_time
-    )
-    db.add(log)
-    db.commit()
-    db.refresh(log)
-    db.close()
-    return {"status": "ok", "log_id": log.id}
-
-# --- AIとスケジュール相談 ---
-@app.post("/plan_schedule")
-def plan_schedule(message: str = Form(...), session_id: str = Form(...)):
-    db = SessionLocal()
-    logs = db.query(ScreenTimeLog).filter(ScreenTimeLog.session_id==session_id).order_by(ScreenTimeLog.date.desc()).all()
-
-    if logs:
-        recent = logs[0]
-        prompt = f"""
-あなたは勉強アドバイザーです。
-ユーザーは昨日 {recent.study_time}時間勉強し、SNS {recent.sns_time}時間、ゲーム {recent.game_time}時間使いました。
-ユーザーの希望は「{message}」です。
-会話形式で、無理なく勉強スケジュールを決める提案をしてください。
-"""
-    else:
-        prompt = f"ユーザーの希望: {message}\n会話形式でスケジュール提案をしてください。"
-
-    headers = {
-        "Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}",
-        "Content-Type": "application/json"
-    }
-    data = {
-        "model": "openai/gpt-3.5-turbo",
-        "messages": [{"role": "system", "content": prompt}]
-    }
-    response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
-    if response.status_code != 200:
-        db.close()
-        return {"response": f"APIエラー: {response.status_code}"}
-    try:
-        assistant_reply = response.json()["choices"][0]["message"]["content"]
-    except:
-        assistant_reply = "AIの返答取得エラー"
-
-    db.close()
-    return {"response": assistant_reply}
