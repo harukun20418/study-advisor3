@@ -10,9 +10,16 @@ import requests
 from typing import List
 import sqlite3
 import os
+from sqlalchemy import inspect
 
 # --- FastAPIアプリの作成 ---
 app = FastAPI()
+
+@app.get("/debug/db")
+def debug_db():
+    inspector = inspect(engine)
+    tables = inspector.get_table_names()
+    return {"tables": tables}
 
 # staticフォルダを公開
 app.mount("/static", StaticFiles(directory="static"), name="static")
