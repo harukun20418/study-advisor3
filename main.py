@@ -11,15 +11,28 @@ from typing import List
 import sqlite3
 import os
 from sqlalchemy import inspect
+#import sqlite3
 
 # --- FastAPIアプリの作成 ---
 app = FastAPI()
 
+# --- デバッグ用 ---
 @app.get("/debug/db")
 def debug_db():
     inspector = inspect(engine)
     tables = inspector.get_table_names()
     return {"tables": tables}
+
+#conn = sqlite3.connect("chat.db")
+#cursor = conn.cursor()
+
+# 古いテーブルを削除
+#cursor.execute("DROP TABLE IF EXISTS messages;")
+#cursor.execute("DROP TABLE IF EXISTS sessions;")
+
+#conn.commit()
+#conn.close()
+#print("古いテーブルを削除しました。")
 
 # staticフォルダを公開
 app.mount("/static", StaticFiles(directory="static"), name="static")
