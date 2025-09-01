@@ -1,14 +1,15 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
-from sqlalchemy import create_engine, Column, Integer, String, Text
+from sqlalchemy import create_engine, Column, Integer, String, Text, Float, Date
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import requests
 import os
 from typing import List
+from datetime import date
 
 # --- FastAPIアプリ ---
 app = FastAPI()
@@ -36,7 +37,23 @@ class ChatSession(Base):
     title = Column(String)
     question_index = Column(Integer, default=0)
 
-# --- テーブル作成（存在しなければ作成） ---
+class ScreenTimeLog(Base):
+    __tablename__ = "screen_time_logs"
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String, index=True)
+    date = Column(Date)
+    study_time = Column(Float, default=0.0)
+    sns_time = Column(Float, default=0.0)
+    game_time = Column(Float, default=0.0)
+
+class SchedulePlan(Base):
+    __tablename__ = "schedule_plans"
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String, index=True)
+    date = Column(Date)
+    plan_json = Column(Text)
+
+# --- テーブル作成 ---
 Base.metadata.create_all(bind=engine)
 
 # --- Pydantic ---
@@ -55,6 +72,11 @@ class ChatSessionResponse(BaseModel):
     question_index: int
     class Config:
         orm_mode = True
+
+class ScreenTimeInput(BaseModel):
+    study_time: float
+    sns_time: float
+    game_time: float
 
 # --- 質問リスト ---
 QUESTIONS = [
@@ -75,7 +97,6 @@ async def read_index(request: Request):
 @app.post("/chat")
 def chat(request: ChatRequest):
     db = SessionLocal()
-    # セッション確認 or 作成
     session_obj = db.query(ChatSession).filter(ChatSession.session_id == request.session_id).first()
     if not session_obj:
         session_obj = ChatSession(session_id=request.session_id, title=f"セッション {request.session_id}")
@@ -83,7 +104,6 @@ def chat(request: ChatRequest):
         db.commit()
         db.refresh(session_obj)
 
-    # --- 質問モード ---
     if session_obj.question_index < len(QUESTIONS):
         db.add(ChatLog(session_id=request.session_id, role="user", content=request.message))
         db.commit()
@@ -95,9 +115,9 @@ def chat(request: ChatRequest):
         db.add(ChatLog(session_id=request.session_id, role="assistant", content=response_text))
         db.commit()
 
+        db.close()
         return {"response": response_text}
 
-    # --- 自由会話モード ---
     history = db.query(ChatLog).filter(ChatLog.session_id == request.session_id).order_by(ChatLog.id.asc()).all()
     messages = [{"role": log.role, "content": log.content} for log in history]
 
@@ -117,10 +137,9 @@ def chat(request: ChatRequest):
         ]
     }
     response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
-
     if response.status_code != 200:
+        db.close()
         return {"response": f"APIエラー: {response.status_code}"}
-
     try:
         assistant_reply = response.json()["choices"][0]["message"]["content"]
     except:
@@ -129,7 +148,6 @@ def chat(request: ChatRequest):
     db.add(ChatLog(session_id=request.session_id, role="assistant", content=assistant_reply))
     db.commit()
     db.close()
-
     return {"response": assistant_reply}
 
 # --- 履歴取得 ---
@@ -158,3 +176,57 @@ def get_sessions():
     sessions = db.query(ChatSession).all()
     db.close()
     return sessions
+
+# --- スクリーンタイム送信 ---
+@app.post("/screen_time")
+def send_screen_time(data: ScreenTimeInput, session_id: str = Form(...)):
+    db = SessionLocal()
+    log = ScreenTimeLog(
+        session_id=session_id,
+        date=date.today(),
+        study_time=data.study_time,
+        sns_time=data.sns_time,
+        game_time=data.game_time
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+    db.close()
+    return {"status": "ok", "log_id": log.id}
+
+# --- AIとスケジュール相談 ---
+@app.post("/plan_schedule")
+def plan_schedule(message: str = Form(...), session_id: str = Form(...)):
+    db = SessionLocal()
+    logs = db.query(ScreenTimeLog).filter(ScreenTimeLog.session_id==session_id).order_by(ScreenTimeLog.date.desc()).all()
+
+    if logs:
+        recent = logs[0]
+        prompt = f"""
+あなたは勉強アドバイザーです。
+ユーザーは昨日 {recent.study_time}時間勉強し、SNS {recent.sns_time}時間、ゲーム {recent.game_time}時間使いました。
+ユーザーの希望は「{message}」です。
+会話形式で、無理なく勉強スケジュールを決める提案をしてください。
+"""
+    else:
+        prompt = f"ユーザーの希望: {message}\n会話形式でスケジュール提案をしてください。"
+
+    headers = {
+        "Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "model": "openai/gpt-3.5-turbo",
+        "messages": [{"role": "system", "content": prompt}]
+    }
+    response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
+    if response.status_code != 200:
+        db.close()
+        return {"response": f"APIエラー: {response.status_code}"}
+    try:
+        assistant_reply = response.json()["choices"][0]["message"]["content"]
+    except:
+        assistant_reply = "AIの返答取得エラー"
+
+    db.close()
+    return {"response": assistant_reply}
