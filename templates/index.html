@@ -124,4 +124,15 @@ form.addEventListener("submit", async (e)=>{
 
     if(questionIndex < questions.length){
         await fetch("/chat", {
-            method: "
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: userMessage, session_id: sessionId })
+        });
+        askNextQuestion();
+    } else {
+        sendMessage(userMessage);
+    }
+});
+</script>
+</body>
+</html>
