@@ -29,13 +29,18 @@ body { font-family: Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 
 </div>
 
 <script>
+// --- セッションIDを取得（なければ生成して保存） ---
+let sessionId = localStorage.getItem("session_id");
+if (!sessionId) {
+    sessionId = crypto.randomUUID();
+    localStorage.setItem("session_id", sessionId);
+}
+
 const form = document.getElementById("chat-form");
 const input = document.getElementById("chat-input");
 const messages = document.getElementById("messages");
 const sendButton = document.getElementById("send-button");
 const status = document.getElementById("status");
-
-let sessionId = "default-session";  // 必要に応じて動的に変更可能
 let isWaiting = false;
 
 // メッセージ表示
