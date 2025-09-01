@@ -8,6 +8,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import requests
 import os
+from sqlalchemy import text
 
 # --- FastAPIアプリ ---
 app = FastAPI()
@@ -19,6 +20,16 @@ DATABASE_URL = "sqlite:///./chat.db"
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(bind=engine)
 Base = declarative_base()
+
+# データベース接続
+db = SessionLocal()
+db.execute(text("DROP TABLE IF EXISTS chat_sessions"))
+db.execute(text("DROP TABLE IF EXISTS chat_logs"))
+db.commit()
+db.close()
+
+# 新しいテーブルを作成
+Base.metadata.create_all(bind=engine)
 
 # --- DBモデル ---
 class ChatLog(Base):
