@@ -76,6 +76,7 @@ QUESTIONS = [
 # --- トップページ ---
 @app.get("/", response_class=HTMLResponse)
 async def read_index(request: Request):
+    「「
     return templates.TemplateResponse("index.html", {"request": request})
 
 # --- チャットAPI ---
@@ -134,7 +135,7 @@ def chat(request: ChatRequest):
     system_prompt = (
         f"あなたは勉強アドバイザーです。ユーザーの名前は {session_obj.username or 'ユーザー'} です。"
         f"今日の勉強時間は {session_obj.study_time} 時間、スマホ時間は {session_obj.phone_time} 時間です。"
-        "共感しつつ、短く1〜2文で質問や提案を出し、ユーザーに確認しながらスケジュールを決める会話形式で返答してください。"
+        "ユーザーに共感してください。短く1〜2文で質問や提案を出してください。提案の具体性がない場合は補足を加えてください。回答を出す前に、その回答が適切かどうかを考えてください。ユーザーに確認しながらスケジュールを決める会話形式で返答してください。"
     )
     data = {
         "model": "openai/gpt-3.5-turbo",
