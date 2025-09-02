@@ -31,6 +31,26 @@ body { font-family: Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 
 </div>
 
 <script>
+// ===== セッションID 永続化 =====
+const SESSION_KEY = "sessionId";
+function uuidv4_fallback() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
+}
+function getOrCreateSessionId() {
+    let id = localStorage.getItem(SESSION_KEY);
+    if (!id) {
+        id = (crypto.randomUUID ? crypto.randomUUID() : uuidv4_fallback());
+        localStorage.setItem(SESSION_KEY, id);
+    }
+    return id;
+}
+let sessionId = getOrCreateSessionId();
+
+// ===== DOM =====
 const form = document.getElementById("chat-form");
 const input = document.getElementById("chat-input");
 const messages = document.getElementById("messages");
@@ -39,10 +59,9 @@ const status = document.getElementById("status");
 const studyInput = document.getElementById("study-time");
 const phoneInput = document.getElementById("phone-time");
 
-let sessionId = "default-session";  // 必要に応じて動的に変更可能
 let isWaiting = false;
 
-// メッセージ表示
+// メッセージ追加
 function appendMessage(content, sender) {
     const div = document.createElement("div");
     div.className = `message ${sender}`;
@@ -51,14 +70,17 @@ function appendMessage(content, sender) {
     messages.scrollTop = messages.scrollHeight;
 }
 
-// 過去履歴取得
+// 履歴取得
 async function loadHistory() {
     try {
         const res = await fetch(`/history/${sessionId}`);
+        if (!res.ok) return [];
         const data = await res.json();
         data.history.forEach(h => appendMessage(h.content, h.role === "user" ? "user" : "ai"));
+        return data.history;
     } catch (e) {
         console.error("履歴取得エラー", e);
+        return [];
     }
 }
 
@@ -66,8 +88,9 @@ async function loadHistory() {
 async function sendMessage(msg) {
     if (!msg.trim()) return;
     appendMessage(msg, "user");
-    const studyTime = studyInput.value ? parseInt(studyInput.value) : 0;
-    const phoneTime = phoneInput.value ? parseInt(phoneInput.value) : 0;
+
+    const studyTime = studyInput.value ? parseInt(studyInput.value, 10) : 0;
+    const phoneTime = phoneInput.value ? parseInt(phoneInput.value, 10) : 0;
 
     input.value = "";
     studyInput.value = "";
@@ -81,13 +104,19 @@ async function sendMessage(msg) {
         const res = await fetch("/chat", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ 
-                message: msg, 
-                session_id: sessionId, 
-                study_time: studyTime, 
-                phone_time: phoneTime 
+            body: JSON.stringify({
+                message: msg,
+                session_id: sessionId,
+                study_time: studyTime,
+                phone_time: phoneTime
             })
         });
+
+        if (!res.ok) {
+            appendMessage("通信エラーが発生しました。", "ai");
+            return;
+        }
+
         const data = await res.json();
         appendMessage(data.response, "ai");
     } catch (e) {
@@ -99,13 +128,20 @@ async function sendMessage(msg) {
     }
 }
 
+// フォーム submit
 form.addEventListener("submit", (e) => {
     e.preventDefault();
     if (!isWaiting && input.value.trim()) sendMessage(input.value);
 });
 
-// 初期ロードで履歴を表示
-window.onload = () => loadHistory();
+// 初期ロード
+window.addEventListener("load", async () => {
+    const history = await loadHistory();
+    if (history.length === 0) {
+        // 初回のみ AI が自己紹介を投げる
+        appendMessage("初めまして！今日はどんな勉強をする予定？", "ai");
+    }
+});
 </script>
 </body>
 </html>
