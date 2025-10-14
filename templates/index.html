@@ -129,7 +129,7 @@ form.addEventListener("submit", (e) => {
 window.addEventListener("load", async () => {
     const history = await loadHistory();
     if (history.length === 0) {
-        appendMessage("初めまして！今日はどんな勉強をする予定？", "ai");
+        appendMessage("初めまして！", "ai");
     }
 });
 </script>
