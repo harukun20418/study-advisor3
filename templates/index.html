@@ -54,8 +54,6 @@ const input = document.getElementById("chat-input");
 const messages = document.getElementById("messages");
 const sendButton = document.getElementById("send-button");
 const status = document.getElementById("status");
-const studyInput = document.getElementById("study-time");
-const phoneInput = document.getElementById("phone-time");
 
 let isWaiting = false;
 
@@ -87,12 +85,7 @@ async function sendMessage(msg) {
     if (!msg.trim()) return;
     appendMessage(msg, "user");
 
-    const studyTime = studyInput.value ? parseInt(studyInput.value, 10) : 0;
-    const phoneTime = phoneInput.value ? parseInt(phoneInput.value, 10) : 0;
-
     input.value = "";
-    studyInput.value = "";
-    phoneInput.value = "";
 
     isWaiting = true;
     sendButton.disabled = true;
@@ -105,8 +98,8 @@ async function sendMessage(msg) {
             body: JSON.stringify({
                 message: msg,
                 session_id: sessionId,
-                study_time: studyTime,
-                phone_time: phoneTime
+                study_time: 0,
+                phone_time: 0
             })
         });
 
@@ -136,7 +129,6 @@ form.addEventListener("submit", (e) => {
 window.addEventListener("load", async () => {
     const history = await loadHistory();
     if (history.length === 0) {
-        // 初回のみ AI が自己紹介を投げる
         appendMessage("初めまして！今日はどんな勉強をする予定？", "ai");
     }
 });
