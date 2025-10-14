@@ -21,6 +21,7 @@ engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(bind=engine)
 Base = declarative_base()
 
+
 # --- DBモデル ---
 class ChatLog(Base):
     __tablename__ = "chat_logs"
@@ -28,6 +29,7 @@ class ChatLog(Base):
     session_id = Column(String, index=True)
     role = Column(String)
     content = Column(Text)
+
 
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
@@ -39,8 +41,10 @@ class ChatSession(Base):
     study_time = Column(Integer, default=0)
     phone_time = Column(Integer, default=0)
 
+
 # --- テーブル作成 ---
 Base.metadata.create_all(bind=engine)
+
 
 # --- Pydantic ---
 class ChatRequest(BaseModel):
@@ -49,9 +53,11 @@ class ChatRequest(BaseModel):
     study_time: int = 0
     phone_time: int = 0
 
+
 class ChatSessionCreate(BaseModel):
     session_id: str
     title: str
+
 
 class ChatSessionResponse(BaseModel):
     id: int
@@ -61,38 +67,44 @@ class ChatSessionResponse(BaseModel):
     username: str
     study_time: int
     phone_time: int
+
     class Config:
         orm_mode = True
+
 
 # --- 質問リスト ---
 QUESTIONS = [
     "こんにちは！私はあなたの勉強をサポートします！まずは4つの質問であなたのことを教えてください、あなたの事は何と呼べばいいですか？",
-    "了解です！何のための勉強をサポートしてほしいですか？(例: 試験対策、受験勉強など)",
-    "なるほど、普段の1日の勉強時間はどのくらいですか？",
-    "スマホは1日どれくらい使いますか？",
-    "勉強はコツコツ派ですか、それとも一夜漬けタイプですか？"
+    "了解です！何のための勉強をサポートしてほしいですか？(例: 試験対策、受験勉強など)", "なるほど、普段の1日の勉強時間はどのくらいですか？",
+    "スマホは1日どれくらい使いますか？", "勉強はコツコツ派ですか、それとも一夜漬けタイプですか？"
 ]
+
 
 # --- トップページ ---
 @app.get("/", response_class=HTMLResponse)
 async def read_index(request: Request):
-    「「
     return templates.TemplateResponse("index.html", {"request": request})
+
 
 # --- チャットAPI ---
 @app.post("/chat")
 def chat(request: ChatRequest):
     db = SessionLocal()
-    session_obj = db.query(ChatSession).filter(ChatSession.session_id == request.session_id).first()
+    session_obj = db.query(ChatSession).filter(
+        ChatSession.session_id == request.session_id).first()
     if not session_obj:
-        session_obj = ChatSession(session_id=request.session_id, title=f"セッション {request.session_id}")
+        session_obj = ChatSession(session_id=request.session_id,
+                                  title=f"セッション {request.session_id}")
         db.add(session_obj)
         db.commit()
         db.refresh(session_obj)
 
     # --- 質問モード ---
     if session_obj.question_index < len(QUESTIONS):
-        db.add(ChatLog(session_id=request.session_id, role="user", content=request.message))
+        db.add(
+            ChatLog(session_id=request.session_id,
+                    role="user",
+                    content=request.message))
         db.commit()
 
         if session_obj.question_index == 1:
@@ -110,13 +122,18 @@ def chat(request: ChatRequest):
         if session_obj.username:
             response_text = response_text.replace("あなた", session_obj.username)
 
-        db.add(ChatLog(session_id=request.session_id, role="assistant", content=response_text))
+        db.add(
+            ChatLog(session_id=request.session_id,
+                    role="assistant",
+                    content=response_text))
         db.commit()
         db.close()
         return {"response": response_text}
 
     # --- 自由会話モード ---
-    history = db.query(ChatLog).filter(ChatLog.session_id == request.session_id).order_by(ChatLog.id.asc()).all()
+    history = db.query(ChatLog).filter(
+        ChatLog.session_id == request.session_id).order_by(
+            ChatLog.id.asc()).all()
     messages = [{"role": log.role, "content": log.content} for log in history]
 
     if request.study_time:
@@ -125,7 +142,10 @@ def chat(request: ChatRequest):
         session_obj.phone_time = request.phone_time
     db.commit()
 
-    db.add(ChatLog(session_id=request.session_id, role="user", content=request.message))
+    db.add(
+        ChatLog(session_id=request.session_id,
+                role="user",
+                content=request.message))
     db.commit()
 
     headers = {
@@ -133,20 +153,26 @@ def chat(request: ChatRequest):
         "Content-Type": "application/json"
     }
     system_prompt = (
-        f"あなたは勉強アドバイザーです。ユーザーの名前は {session_obj.username or 'ユーザー'} です。"
+        f"あなたは勉強アドバイザーです。あなたは、ユーザと会話を重ねて、ユーザーのしたい勉強に応じた計画を立てることを補助するスペシャリストです。ユーザーの名前は {session_obj.username or 'ユーザー'} です。"
         f"今日の勉強時間は {session_obj.study_time} 時間、スマホ時間は {session_obj.phone_time} 時間です。"
-        "ユーザーに共感してください。短く1〜2文で質問や提案を出してください。提案の具体性がない場合は補足を加えてください。回答を出す前に、その回答が適切かどうかを考えてください。ユーザーに確認しながらスケジュールを決める会話形式で返答してください。"
+        "ユーザーに共感してください。短く1〜2文で質問や提案を出してください。提案の具体性がない場合は補足を加えてください。回答を出す前に、その回答が適切かどうかを考えてください。ユーザーに確認しながらスケジュールを決める会話形式で返答してください。例えばユーザーが勉強したいことに対して、分類し、一日目はこれを、二日目はこれをしてはどうですかと提案します。"
     )
     data = {
-        "model": "openai/gpt-3.5-turbo",
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            *messages,
-            {"role": "user", "content": request.message}
-        ],
-        "max_tokens": 150
+        "model":
+        "openai/gpt-3.5-turbo",
+        "messages": [{
+            "role": "system",
+            "content": system_prompt
+        }, *messages, {
+            "role": "user",
+            "content": request.message
+        }],
+        "max_tokens":
+        150
     }
-    response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
+    response = requests.post("https://openrouter.ai/api/v1/chat/completions",
+                             headers=headers,
+                             json=data)
 
     if response.status_code != 200:
         db.close()
@@ -157,29 +183,42 @@ def chat(request: ChatRequest):
     except:
         assistant_reply = "AIの返答取得エラー"
 
-    db.add(ChatLog(session_id=request.session_id, role="assistant", content=assistant_reply))
+    db.add(
+        ChatLog(session_id=request.session_id,
+                role="assistant",
+                content=assistant_reply))
     db.commit()
     db.close()
     return {"response": assistant_reply}
+
 
 # --- 履歴取得 ---
 @app.get("/history/{session_id}")
 def get_history(session_id: str):
     db = SessionLocal()
-    logs = db.query(ChatLog).filter(ChatLog.session_id == session_id).order_by(ChatLog.id.asc()).all()
+    logs = db.query(ChatLog).filter(ChatLog.session_id == session_id).order_by(
+        ChatLog.id.asc()).all()
     db.close()
-    return {"history": [{"role": log.role, "content": log.content} for log in logs]}
+    return {
+        "history": [{
+            "role": log.role,
+            "content": log.content
+        } for log in logs]
+    }
+
 
 # --- セッション作成 ---
 @app.post("/sessions", response_model=ChatSessionResponse)
 def create_session(session: ChatSessionCreate):
     db = SessionLocal()
-    db_session = ChatSession(session_id=session.session_id, title=session.title)
+    db_session = ChatSession(session_id=session.session_id,
+                             title=session.title)
     db.add(db_session)
     db.commit()
     db.refresh(db_session)
     db.close()
     return db_session
+
 
 # --- セッション一覧 ---
 @app.get("/sessions", response_model=List[ChatSessionResponse])
