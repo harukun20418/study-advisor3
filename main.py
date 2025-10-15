@@ -75,7 +75,7 @@ class ChatSessionResponse(BaseModel):
 # --- 質問リスト ---
 QUESTIONS = [
     "こんにちは！私はあなたの勉強をサポートします！まずは4つの質問であなたのことを教えてください、あなたの事は何と呼べばいいですか？",
-    "了解です！何のための勉強をサポートしてほしいですか？(例: 試験対策、受験勉強など)", "なるほど、普段の1日の勉強時間はどのくらいですか？",
+    "了解です！何のための勉強をサポートしてほしいですか？(例: 定期テスト、受験勉強など)", "なるほど、普段の1日の勉強時間はどのくらいですか？",
     "スマホは1日どれくらい使いますか？", "勉強はコツコツ派ですか、それとも一夜漬けタイプですか？"
 ]
 
@@ -168,7 +168,7 @@ def chat(request: ChatRequest):
             "content": request.message
         }],
         "max_tokens":
-        150
+        1000
     }
     response = requests.post("https://openrouter.ai/api/v1/chat/completions",
                              headers=headers,
